@@ -591,9 +591,6 @@
 </div>
 
 
-<!-- recaptcha invisible -->
-<div id="recaptcha-container"></div>
-
 <!-- ── Auth Modal ── -->
 <div class="overlay" id="authOverlay" onclick="if(event.target===this)closeAuthModal()">
   <div class="auth-box">
@@ -685,7 +682,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 
@@ -709,19 +705,24 @@ const ADMIN_PASSWORD = "748508"; // proteção simples client-side — trocar an
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const storage = firebase.storage();
-const auth = firebase.auth();
 
-// ── Auth state ──
+// ── Auth state (sessão local, verificação via Firestore) ──
 let currentUser = null;
 let customerProfile = null;
 let afterLoginCb = null;
-let adminOrders = [];  // cache para PDF no admin
+let adminOrders = [];
+let _authPhone = '';   // telefone digitado no step1
 
-auth.onAuthStateChanged(user => {
-  currentUser = user;
-  updateHeaderAuth();
-  if(user) loadCustomerProfile(user.uid);
-});
+// Restaura sessão salva no localStorage
+(function restoreSession(){
+  try {
+    const s = JSON.parse(localStorage.getItem('ar_session')||'null');
+    if(s && s.expiry > Date.now()){
+      currentUser = {uid: s.uid, phoneNumber: s.phone};
+      loadCustomerProfile(s.uid).then(()=>updateHeaderAuth());
+    }
+  } catch(e){}
+})();
 
 let CATEGORIES = ["Todos","Tratamentos","Progressivas","Home Care","Reconstrução","Finalizadores","Kits","Promoções"];
 
@@ -1388,7 +1389,7 @@ function closeModal(){
 
 
 /* ═══════════════════════════════════════════
-   AUTH (Fase 2 — Firebase Phone Auth / SMS OTP)
+   AUTH — código via WhatsApp (sem Firebase Phone Auth)
 ═══════════════════════════════════════════ */
 function updateHeaderAuth(){
   const btn = document.getElementById('userBtn');
@@ -1405,7 +1406,6 @@ function updateHeaderAuth(){
 
 function handleUserBtn(){
   if(currentUser){
-    // show menu: my orders / logout
     const menu = document.createElement('div');
     menu.style.cssText = 'position:fixed;top:70px;right:24px;background:var(--white);border:1px solid var(--taupe-line);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:180px;';
     menu.innerHTML = `
@@ -1419,10 +1419,9 @@ function handleUserBtn(){
 }
 
 function doLogout(){
-  auth.signOut().then(()=>{
-    currentUser = null; customerProfile = null;
-    updateHeaderAuth();
-  });
+  localStorage.removeItem('ar_session');
+  currentUser = null; customerProfile = null;
+  updateHeaderAuth();
 }
 
 function showAuthModal(callback){
@@ -1459,34 +1458,52 @@ function showAuthErr(step, msg){
   if(el) el.textContent = msg;
 }
 
+function generateCode(){
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 async function sendOTP(){
   const raw = document.getElementById('authPhone').value.replace(/\D/g,'');
   if(raw.length < 10){ showAuthErr(1,'Número inválido. Use DDD + número.'); return; }
-  const phone = '+55' + raw;
-  const btn = document.getElementById('btnSendOTP');
-  btn.disabled = true; btn.textContent = 'Enviando\u2026';
-  try {
-    // Substituir o nó DOM completamente — Firebase vê elemento novo, sem conflito de widget
-    const oldRc = document.getElementById('recaptcha-container');
-    const freshRc = document.createElement('div');
-    freshRc.id = 'recaptcha-container';
-    oldRc.parentNode.replaceChild(freshRc, oldRc);
+  _authPhone = '+55' + raw;
 
-    window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
-      size: 'invisible'
+  const btn = document.getElementById('btnSendOTP');
+  btn.disabled = true; btn.textContent = 'Gerando código…';
+
+  try {
+    const code = generateCode();
+    const expiry = Date.now() + 10 * 60 * 1000; // 10 min
+
+    // Salva no Firestore
+    await db.collection('ar_verificacoes').doc(_authPhone).set({
+      code, expiry,
+      criadoEm: firebase.firestore.FieldValue.serverTimestamp()
     });
-    window.confirmationResult = await auth.signInWithPhoneNumber(phone, window.recaptchaVerifier);
-    const fmt = raw.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-    document.getElementById('authCodeSub').textContent = 'Código enviado para +55 ' + fmt;
+
+    // Mostra código na tela
+    const codeDisplay = document.getElementById('authCodeDisplay');
+    if(codeDisplay) codeDisplay.textContent = code;
+
+    // Abre WhatsApp com o código pré-preenchido para o cliente enviar ao número do negócio
+    const fmt = raw.replace(/(\d{2})(\d{5})(\d{4})/,'($1) $2-$3');
+    document.getElementById('authCodeSub').innerHTML =
+      'Seu código: <strong style="font-size:22px;letter-spacing:.12em;color:var(--bronze-dark);">' + code + '</strong><br>'
+      + '<span style="font-size:12px;color:#8a8074;">Digite-o abaixo. Válido por 10 minutos.</span>';
+
+    // Abre WA para o cliente mandar o código ao negócio (contexto do pedido)
+    const waMsg = encodeURIComponent('Olá! Meu código de verificação A R Professional: ' + code);
+    window.open('https://wa.me/' + WHATSAPP_NUMBER + '?text=' + waMsg, '_blank');
+
     setAuthStep(2);
-    setTimeout(()=>document.getElementById('authCode').focus(), 200);
+    setTimeout(()=>document.getElementById('authCode').focus(), 300);
   } catch(err){
     console.error(err);
-    showAuthErr(1, 'Erro: ' + (err.message || 'tente novamente'));
+    showAuthErr(1, 'Erro: ' + (err.message||'tente novamente'));
   } finally {
-    btn.disabled = false; btn.textContent = 'Enviar código por SMS';
+    btn.disabled=false; btn.textContent='Enviar código por SMS';
   }
 }
+
 function backToPhone(){
   setAuthStep(1);
   clearAuthErr();
@@ -1496,32 +1513,41 @@ async function verifyOTP(){
   const code = String(document.getElementById('authCode').value).trim();
   if(code.length < 6){ showAuthErr(2,'Digite os 6 dígitos.'); return; }
 
-  // guarda diagnóstico visível
-  if(!window.confirmationResult){
-    showAuthErr(2,'Sessão expirada — envie o código novamente.');
-    return;
-  }
-
   const btn = document.getElementById('btnVerifyOTP');
   btn.disabled=true; btn.textContent='Verificando…';
+
   try {
-    const result = await window.confirmationResult.confirm(code);
-    const user = result.user;
-    const doc = await db.collection('ar_clientes').doc(user.uid).get();
-    if(!doc.exists){
+    const docRef = db.collection('ar_verificacoes').doc(_authPhone);
+    const snap = await docRef.get();
+
+    if(!snap.exists){ showAuthErr(2,'Código não encontrado. Solicite um novo.'); return; }
+
+    const data = snap.data();
+    if(Date.now() > data.expiry){ showAuthErr(2,'Código expirado. Solicite um novo.'); return; }
+    if(data.code !== code){ showAuthErr(2,'Código incorreto.'); return; }
+
+    // Código correto — apaga e autentica
+    await docRef.delete();
+
+    const uid = 'p_' + _authPhone.replace(/\D/g,'');
+    const session = { uid, phone: _authPhone, expiry: Date.now() + 30*24*60*60*1000 };
+    localStorage.setItem('ar_session', JSON.stringify(session));
+    currentUser = { uid, phoneNumber: _authPhone };
+
+    // Novo ou existente?
+    const clienteSnap = await db.collection('ar_clientes').doc(uid).get();
+    if(!clienteSnap.exists){
       setAuthStep(3);
       setTimeout(()=>document.getElementById('authNome').focus(), 200);
     } else {
-      customerProfile = doc.data();
+      customerProfile = clienteSnap.data();
       closeAuthModal();
       updateHeaderAuth();
       if(afterLoginCb){ afterLoginCb(); afterLoginCb=null; }
     }
   } catch(err){
-    console.error('verifyOTP error:', err);
-    // mostra código de erro real para diagnóstico
-    const msg = err.code ? err.code + ': ' + (err.message||'') : (err.message||'Erro desconhecido');
-    showAuthErr(2, msg);
+    console.error(err);
+    showAuthErr(2, err.message||'Erro ao verificar');
   } finally {
     btn.disabled=false; btn.textContent='Verificar';
   }
@@ -1535,7 +1561,7 @@ async function completeRegistration(){
   try {
     const profile = {
       nome,
-      whatsapp: currentUser.phoneNumber,
+      whatsapp: _authPhone,
       criadoEm: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection('ar_clientes').doc(currentUser.uid).set(profile);
@@ -1551,10 +1577,12 @@ async function completeRegistration(){
   }
 }
 
+
 async function loadCustomerProfile(uid){
   try {
     const doc = await db.collection('ar_clientes').doc(uid).get();
-    if(doc.exists){ customerProfile = doc.data(); updateHeaderAuth(); }
+    if(doc.exists){ customerProfile = doc.data(); }
+    updateHeaderAuth();
   } catch(e){ console.error(e); }
 }
 
