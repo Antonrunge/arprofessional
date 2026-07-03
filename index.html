@@ -1464,31 +1464,29 @@ async function sendOTP(){
   if(raw.length < 10){ showAuthErr(1,'Número inválido. Use DDD + número.'); return; }
   const phone = '+55' + raw;
   const btn = document.getElementById('btnSendOTP');
-  btn.disabled = true; btn.textContent = 'Enviando…';
+  btn.disabled = true; btn.textContent = 'Enviando\u2026';
   try {
-    if(window.recaptchaVerifier){
-      try{ window.recaptchaVerifier.clear(); }catch(e){}
-    }
-    // limpa container para evitar "already rendered"
-    const rc = document.getElementById('recaptcha-container');
-    rc.innerHTML = '';
+    // Substituir o nó DOM completamente — Firebase vê elemento novo, sem conflito de widget
+    const oldRc = document.getElementById('recaptcha-container');
+    const freshRc = document.createElement('div');
+    freshRc.id = 'recaptcha-container';
+    oldRc.parentNode.replaceChild(freshRc, oldRc);
+
     window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
-      size: 'invisible',
-      callback: ()=>{}
+      size: 'invisible'
     });
-    await window.recaptchaVerifier.render();
     window.confirmationResult = await auth.signInWithPhoneNumber(phone, window.recaptchaVerifier);
-    document.getElementById('authCodeSub').textContent = 'Código enviado para +55 ' + raw.replace(/(\d{2})(\d{5})(\d{4})/,'($1) $2-$3');
+    const fmt = raw.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+    document.getElementById('authCodeSub').textContent = 'Código enviado para +55 ' + fmt;
     setAuthStep(2);
     setTimeout(()=>document.getElementById('authCode').focus(), 200);
   } catch(err){
     console.error(err);
-    showAuthErr(1, 'Erro ao enviar: ' + (err.message||'tente novamente'));
+    showAuthErr(1, 'Erro: ' + (err.message || 'tente novamente'));
   } finally {
-    btn.disabled=false; btn.textContent='Enviar código por SMS';
+    btn.disabled = false; btn.textContent = 'Enviar código por SMS';
   }
 }
-
 function backToPhone(){
   setAuthStep(1);
   clearAuthErr();
