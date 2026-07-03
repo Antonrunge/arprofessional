@@ -903,7 +903,7 @@ function renderGrid(){
       : `<div class="price price-consult"><small>&nbsp;</small>Sob consulta</div>`;
     return `
     <div class="card" onclick="openModal('${p.id}')">
-      <div class="thumb">${img}</div>
+      <div class="thumb">${img}<button class="share-btn" title="Copiar link" onclick="shareProduct('${p.id}',event)">🔗</button></div>
       <div class="body">
         <div class="cat">${p.categoria||''}</div>
         <h3>${p.nome}</h3>
@@ -1344,24 +1344,7 @@ function checkShareRoute(){
   }
 }
 
-/* Adicionar botão de compartilhar em cada card */
-const _origRenderGrid = renderGrid;
-function renderGrid(){
-  _origRenderGrid();
-  document.querySelectorAll('.card').forEach(card => {
-    if(card.querySelector('.share-btn')) return;
-    const onclick = card.getAttribute('onclick');
-    const id = onclick ? onclick.match(/'([^']+)'/)?.[1] : null;
-    if(id){
-      const btn = document.createElement('button');
-      btn.className = 'share-btn';
-      btn.title = 'Copiar link';
-      btn.innerHTML = '🔗';
-      btn.onclick = (e)=>shareProduct(id,e);
-      card.querySelector('.thumb').appendChild(btn);
-    }
-  });
-}
+/* share button já incluído no template do card */
 
 /* Botão compartilhar no modal de produto */
 const _origOpenModal = openModal;
