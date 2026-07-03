@@ -1495,6 +1495,13 @@ function backToPhone(){
 async function verifyOTP(){
   const code = String(document.getElementById('authCode').value).trim();
   if(code.length < 6){ showAuthErr(2,'Digite os 6 dígitos.'); return; }
+
+  // guarda diagnóstico visível
+  if(!window.confirmationResult){
+    showAuthErr(2,'Sessão expirada — envie o código novamente.');
+    return;
+  }
+
   const btn = document.getElementById('btnVerifyOTP');
   btn.disabled=true; btn.textContent='Verificando…';
   try {
@@ -1511,8 +1518,10 @@ async function verifyOTP(){
       if(afterLoginCb){ afterLoginCb(); afterLoginCb=null; }
     }
   } catch(err){
-    console.error(err);
-    showAuthErr(2,'Código incorreto ou expirado.');
+    console.error('verifyOTP error:', err);
+    // mostra código de erro real para diagnóstico
+    const msg = err.code ? err.code + ': ' + (err.message||'') : (err.message||'Erro desconhecido');
+    showAuthErr(2, msg);
   } finally {
     btn.disabled=false; btn.textContent='Verificar';
   }
