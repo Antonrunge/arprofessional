@@ -1469,7 +1469,14 @@ async function sendOTP(){
     if(window.recaptchaVerifier){
       try{ window.recaptchaVerifier.clear(); }catch(e){}
     }
-    window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container',{size:'invisible'});
+    // limpa container para evitar "already rendered"
+    const rc = document.getElementById('recaptcha-container');
+    rc.innerHTML = '';
+    window.recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
+      size: 'invisible',
+      callback: ()=>{}
+    });
+    await window.recaptchaVerifier.render();
     window.confirmationResult = await auth.signInWithPhoneNumber(phone, window.recaptchaVerifier);
     document.getElementById('authCodeSub').textContent = 'Código enviado para +55 ' + raw.replace(/(\d{2})(\d{5})(\d{4})/,'($1) $2-$3');
     setAuthStep(2);
