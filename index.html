@@ -1490,10 +1490,6 @@ async function sendOTP(){
       'Seu código: <strong style="font-size:22px;letter-spacing:.12em;color:var(--bronze-dark);">' + code + '</strong><br>'
       + '<span style="font-size:12px;color:#8a8074;">Digite-o abaixo. Válido por 10 minutos.</span>';
 
-    // Abre WA para o cliente mandar o código ao negócio (contexto do pedido)
-    const waMsg = encodeURIComponent('Olá! Meu código de verificação A R Professional: ' + code);
-    window.open('https://wa.me/' + WHATSAPP_NUMBER + '?text=' + waMsg, '_blank');
-
     setAuthStep(2);
     setTimeout(()=>document.getElementById('authCode').focus(), 300);
   } catch(err){
@@ -1543,6 +1539,10 @@ async function verifyOTP(){
       customerProfile = clienteSnap.data();
       closeAuthModal();
       updateHeaderAuth();
+      // garante vitrine visível e produtos recarregados
+      document.getElementById('publicView').style.display = 'block';
+      document.getElementById('admin-view').classList.remove('open');
+      renderGrid();
       if(afterLoginCb){ afterLoginCb(); afterLoginCb=null; }
     }
   } catch(err){
@@ -1568,6 +1568,9 @@ async function completeRegistration(){
     customerProfile = profile;
     closeAuthModal();
     updateHeaderAuth();
+    document.getElementById('publicView').style.display = 'block';
+    document.getElementById('admin-view').classList.remove('open');
+    renderGrid();
     if(afterLoginCb){ afterLoginCb(); afterLoginCb=null; }
   } catch(err){
     console.error(err);
