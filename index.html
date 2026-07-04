@@ -954,6 +954,18 @@ function openModal(id){
     ${actionBtn}
   `;
   document.getElementById('productOverlay').classList.add('open');
+  history.replaceState(null, '', '#produto-' + id);
+  requestAnimationFrame(()=>{
+    const info = document.getElementById('modalInfo');
+    if(info && !info.querySelector('.btn-share-modal')){
+      const btn = document.createElement('button');
+      btn.className = 'btn-secondary btn-share-modal';
+      btn.style.cssText = 'margin-top:8px;width:100%;font-size:12px;padding:8px;';
+      btn.textContent = '🔗 Copiar link do produto';
+      btn.onclick = ()=>shareProduct(id);
+      info.appendChild(btn);
+    }
+  });
 }
 function setMainImg(src, el){
   document.getElementById('modalMainImg').src = src;
@@ -964,7 +976,10 @@ function toYoutubeEmbed(url){
   const m = url.match(/(?:youtu\.be\/|v=)([\w-]{6,})/);
   return m ? `https://www.youtube.com/embed/${m[1]}` : url;
 }
-function closeModal(){ document.getElementById('productOverlay').classList.remove('open'); }
+function closeModal(){
+  document.getElementById('productOverlay').classList.remove('open');
+  history.replaceState(null, '', location.pathname);
+}
 
 function openLightbox(){
   const src = document.getElementById('modalMainImg').src;
@@ -1344,31 +1359,7 @@ function checkShareRoute(){
   }
 }
 
-/* share button já incluído no template do card */
-
-/* Botão compartilhar no modal de produto */
-const _origOpenModal = openModal;
-function openModal(id){
-  _origOpenModal(id);
-  history.replaceState(null, '', '#produto-' + id);
-  // inject share button in modal if not there
-  requestAnimationFrame(()=>{
-    const info = document.getElementById('modalInfo');
-    if(info && !info.querySelector('.btn-share-modal')){
-      const btn = document.createElement('button');
-      btn.className = 'btn-secondary btn-share-modal';
-      btn.style.cssText = 'margin-top:8px;width:100%;font-size:12px;padding:8px;';
-      btn.textContent = '🔗 Copiar link do produto';
-      btn.onclick = ()=>shareProduct(id);
-      info.appendChild(btn);
-    }
-  });
-}
-const _origCloseModal = closeModal;
-function closeModal(){
-  _origCloseModal();
-  history.replaceState(null, '', location.pathname);
-}
+/* share button já incluído no template do card, e link/histórico já tratados diretamente em openModal/closeModal acima */
 
 
 /* ═══════════════════════════════════════════
