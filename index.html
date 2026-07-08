@@ -547,8 +547,12 @@
     <div id="adminPedidosSection" style="display:none;">
       <div class="admin-toolbar" style="margin-bottom:16px;">
         <h2>Pedidos</h2>
-        <button class="btn-secondary" onclick="loadAdminOrders()">🔄 Atualizar</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-secondary" onclick="loadAdminOrders()">🔄 Atualizar</button>
+          <button class="btn-secondary" onclick="toggleClienteRanking()" id="btnRanking">📊 Ranking de clientes</button>
+        </div>
       </div>
+      <div id="clienteRankingWrap" style="display:none;margin-bottom:24px;"></div>
       <div id="adminOrdersList"><div class="empty-state"><p>Clique em Atualizar para carregar.</p></div></div>
     </div><!-- /adminPedidosSection -->
 
@@ -2132,6 +2136,7 @@ function renderClienteSearchResults(){
       <div class="meta" style="flex:1;min-width:180px;">
         <div class="n">${c.nome||'—'}</div>
         <div class="c">${c.whatsapp||''} · atualmente: ${nivelLabel[nivel]||nivel}</div>
+        <div class="c" id="clienteStats_${i}" style="margin-top:4px;color:#8a8074;">Carregando histórico de compras…</div>
       </div>
       <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
         <select id="nivelSelect_${i}">
@@ -2143,6 +2148,32 @@ function renderClienteSearchResults(){
       </div>
     </div>`;
   }).join('');
+  _clienteSearchResults.forEach((c,i)=> loadClienteStats(c.id, i));
+}
+
+async function loadClienteStats(uid, idx){
+  const el = document.getElementById('clienteStats_'+idx);
+  if(!el) return;
+  try {
+    const snap = await db.collection('ar_pedidos').where('clienteId','==',uid).get();
+    const pedidos = snap.docs.map(d=>d.data());
+    if(!pedidos.length){
+      el.textContent = 'Nenhum pedido ainda.';
+      return;
+    }
+    const total = pedidos.reduce((s,o)=>s+(o.total||0),0);
+    const n = pedidos.length;
+    const ticketMedio = total / n;
+    const datas = pedidos.map(o=>o.criadoEm ? o.criadoEm.seconds*1000 : null).filter(Boolean).sort((a,b)=>a-b);
+    let freqTxt = '';
+    if(datas.length>=2){
+      const diasTotal = (datas[datas.length-1]-datas[0]) / 86400000;
+      freqTxt = ` · compra a cada ~${Math.round(diasTotal/(datas.length-1))} dias`;
+    }
+    el.textContent = `${n} pedido(s) · total ${formatBRL(total)} · ticket médio ${formatBRL(ticketMedio)}${freqTxt}`;
+  } catch(err){
+    el.textContent = 'Erro ao carregar histórico.';
+  }
 }
 
 function setClienteNivel(uid, idx){
@@ -2167,10 +2198,61 @@ function loadAdminOrders(){
     .then(snap=>{
       adminOrders = snap.docs.map(d=>({id:d.id,...d.data()}));
       renderAdminOrders();
+      if(document.getElementById('clienteRankingWrap').style.display === 'block'){
+        renderClienteRanking();
+      }
     })
     .catch(err=>{
       wrap.innerHTML = '<div class="empty-state"><p>Erro: '+err.message+'</p></div>';
     });
+}
+
+function toggleClienteRanking(){
+  const wrap = document.getElementById('clienteRankingWrap');
+  const isOpen = wrap.style.display === 'block';
+  if(isOpen){ wrap.style.display = 'none'; return; }
+  if(!adminOrders.length){
+    wrap.innerHTML = '<div class="empty-state"><p>Clique em "🔄 Atualizar" primeiro para carregar os pedidos.</p></div>';
+    wrap.style.display = 'block';
+    return;
+  }
+  renderClienteRanking();
+  wrap.style.display = 'block';
+}
+
+function renderClienteRanking(){
+  const wrap = document.getElementById('clienteRankingWrap');
+  const porCliente = {};
+  adminOrders.forEach(o=>{
+    const key = o.clienteId || o.clienteNome || '—';
+    if(!porCliente[key]) porCliente[key] = { nome: o.clienteNome||'—', whatsapp: o.clienteWhatsapp||'', total: 0, n: 0, datas: [] };
+    porCliente[key].total += (o.total||0);
+    porCliente[key].n += 1;
+    if(o.criadoEm) porCliente[key].datas.push(o.criadoEm.seconds*1000);
+  });
+  const ranking = Object.values(porCliente).sort((a,b)=>b.total-a.total);
+  if(!ranking.length){
+    wrap.innerHTML = '<div class="empty-state"><p>Nenhum pedido carregado.</p></div>';
+    return;
+  }
+  wrap.innerHTML = `<div class="form-panel">
+    <h3>Ranking de clientes (baseado nos últimos ${adminOrders.length} pedidos carregados)</h3>
+    ${ranking.map(c=>{
+      const ticketMedio = c.total / c.n;
+      let freqTxt = '';
+      if(c.datas.length>=2){
+        const datasOrdenadas = c.datas.slice().sort((a,b)=>a-b);
+        const dias = (datasOrdenadas[datasOrdenadas.length-1]-datasOrdenadas[0]) / 86400000;
+        freqTxt = ` · compra a cada ~${Math.round(dias/(c.datas.length-1))} dias`;
+      }
+      return `<div class="admin-list-item">
+        <div class="meta">
+          <div class="n">${c.nome}</div>
+          <div class="c">${c.n} pedido(s) · total ${formatBRL(c.total)} · ticket médio ${formatBRL(ticketMedio)}${freqTxt}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
 function renderAdminOrders(){
