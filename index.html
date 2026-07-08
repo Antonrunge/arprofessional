@@ -969,7 +969,7 @@ function formatBRL(v){
 
 function getPrecoInfo(p){
   const precos = p.precos || {};
-  const nivel = (customerProfile && customerProfile.statusAprovacao==='aprovado') ? (customerProfile.nivelAprovado||'cliente') : 'cliente';
+  const nivel = (customerProfile && customerProfile.nivelAprovado) || 'cliente';
   if(nivel==='distribuidor' && precos.revendedor){
     return { valor: precos.revendedor, label: 'Preço distribuidor', has: true };
   }
@@ -2065,9 +2065,8 @@ function renderAdminCadastros(){
 function approveCadastro(uid, idx){
   const c = adminCadastros[idx];
   const alvo = c.origem==='upgrade' ? c.upgradeSolicitado : c.tipoConta;
-  const updates = { nivelAprovado: alvo };
+  const updates = { nivelAprovado: alvo, statusAprovacao: 'aprovado' };
   if(c.origem==='upgrade'){ updates.upgradeStatus = 'aprovado'; }
-  else { updates.statusAprovacao = 'aprovado'; }
   db.collection('ar_clientes').doc(uid).update(updates).then(()=>{
     showStatus('Cadastro aprovado: agora vê preço de ' + alvo + '.', 'ok');
     adminCadastros.splice(idx,1);
