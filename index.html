@@ -529,6 +529,7 @@
     <div class="admin-tabs">
       <button class="admin-tab active" id="tabProdutos" onclick="switchAdminTab('produtos')">Produtos</button>
       <button class="admin-tab" id="tabPedidos" onclick="switchAdminTab('pedidos')">Pedidos</button>
+      <button class="admin-tab" id="tabCadastros" onclick="switchAdminTab('cadastros')">Cadastros <span id="pendingCountBadge"></span></button>
     </div>
 
     <!-- PRODUTOS -->
@@ -550,6 +551,16 @@
       </div>
       <div id="adminOrdersList"><div class="empty-state"><p>Clique em Atualizar para carregar.</p></div></div>
     </div><!-- /adminPedidosSection -->
+
+    <!-- CADASTROS -->
+    <div id="adminCadastrosSection" style="display:none;">
+      <div class="admin-toolbar" style="margin-bottom:16px;">
+        <h2>Cadastros profissionais pendentes</h2>
+        <button class="btn-secondary" onclick="loadAdminCadastros()">🔄 Atualizar</button>
+      </div>
+      <p style="font-size:12px;color:#8a8074;margin:-8px 0 16px;">Aprovar libera o preço de cabeleireiro/distribuidor para esse cliente. Enquanto pendente, ele compra normalmente com preço de cliente final.</p>
+      <div id="adminCadastrosList"><div class="empty-state"><p>Clique em Atualizar para carregar.</p></div></div>
+    </div><!-- /adminCadastrosSection -->
 
   </div><!-- /adminPanel -->
 </div><!-- /admin-view -->
@@ -626,9 +637,19 @@
     <!-- step 3: new user profile -->
     <div class="auth-step" id="authStep3">
       <h3>Quase lá!</h3>
-      <p class="sub">Primeiro acesso — precisamos do seu nome para os pedidos.</p>
+      <p class="sub">Primeiro acesso — precisamos de alguns dados.</p>
       <input class="auth-input" id="authNome" type="text" placeholder="Seu nome completo"
         onkeydown="if(event.key==='Enter')completeRegistration()">
+      <select class="auth-input" id="authTipoConta" onchange="toggleAuthTipoConta()">
+        <option value="cliente">Sou cliente final</option>
+        <option value="cabeleireiro">Sou cabeleireiro(a) / profissional</option>
+        <option value="distribuidor">Sou distribuidor(a) / revendedor</option>
+      </select>
+      <div id="authProfDetails" style="display:none;">
+        <input class="auth-input" id="authSalao" type="text" placeholder="Nome do salão / empresa (opcional)">
+        <input class="auth-input" id="authDoc" type="text" placeholder="CPF ou CNPJ (opcional)">
+        <p class="otp-note">Seu cadastro passa por uma aprovação rápida da nossa equipe. Enquanto isso, você já pode comprar com preço de cliente final.</p>
+      </div>
       <button class="auth-btn" onclick="completeRegistration()">Concluir cadastro</button>
       <div class="auth-err" id="authErr3"></div>
     </div>
@@ -719,7 +740,7 @@ let _authPhone = '';   // telefone digitado no step1
     const s = JSON.parse(localStorage.getItem('ar_session')||'null');
     if(s && s.expiry > Date.now()){
       currentUser = {uid: s.uid, phoneNumber: s.phone};
-      loadCustomerProfile(s.uid).then(()=>updateHeaderAuth());
+      loadCustomerProfile(s.uid).then(()=>{ updateHeaderAuth(); renderGrid(); });
     }
   } catch(e){}
 })();
@@ -897,9 +918,9 @@ function renderGrid(){
   }
   grid.innerHTML = list.map(p=>{
     const img = (p.fotos && p.fotos[0]) ? `<img src="${p.fotos[0]}" alt="${p.nome}">` : `<span class="noimg">Sem foto</span>`;
-    const hasCliente = p.precos && p.precos.cliente;
-    const priceBlock = hasCliente
-      ? `<div class="price"><small>Preço cliente</small>${formatBRL(p.precos.cliente)}</div>`
+    const pi = getPrecoInfo(p);
+    const priceBlock = pi.has
+      ? `<div class="price"><small>${pi.label}</small>${formatBRL(pi.valor)}</div>`
       : `<div class="price price-consult"><small>&nbsp;</small>Sob consulta</div>`;
     return `
     <div class="card" onclick="openModal('${p.id}')">
@@ -915,6 +936,18 @@ function renderGrid(){
 
 function formatBRL(v){
   return Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+}
+
+function getPrecoInfo(p){
+  const precos = p.precos || {};
+  const nivel = (customerProfile && customerProfile.statusAprovacao==='aprovado') ? (customerProfile.nivelAprovado||'cliente') : 'cliente';
+  if(nivel==='distribuidor' && precos.revendedor){
+    return { valor: precos.revendedor, label: 'Preço distribuidor', has: true };
+  }
+  if(nivel==='cabeleireiro' && precos.cabeleireiro){
+    return { valor: precos.cabeleireiro, label: 'Preço profissional', has: true };
+  }
+  return { valor: precos.cliente, label: 'Preço cliente', has: !!precos.cliente };
 }
 
 /* ---------------- product modal ---------------- */
@@ -936,11 +969,11 @@ function openModal(id){
   }).join('');
 
   const beneficios = (p.beneficios||[]).map(b=>`<li>${b}</li>`).join('');
-  const hasCliente = p.precos && p.precos.cliente;
-  const priceBlockModal = hasCliente
-    ? `<div class="price-big"><small>Preço cliente final</small>${formatBRL(p.precos.cliente)}</div>`
+  const pi = getPrecoInfo(p);
+  const priceBlockModal = pi.has
+    ? `<div class="price-big"><small>${pi.label}</small>${formatBRL(pi.valor)}</div>`
     : `<div class="price-big price-consult"><small>Item profissional</small>Sob consulta</div>`;
-  const actionBtn = hasCliente
+  const actionBtn = pi.has
     ? `<button class="add-cart" onclick="addToCart('${p.id}')">Adicionar ao carrinho</button>`
     : `<button class="add-cart consult" onclick="consultWhatsApp('${p.id}')">Consultar via WhatsApp</button>`;
   document.getElementById('modalInfo').innerHTML = `
@@ -1009,7 +1042,8 @@ function addToCart(id){
   if(!p) return;
   const existing = cart.find(c=>c.id===id);
   if(existing){ existing.qty++; } else {
-    cart.push({id:p.id, nome:p.nome, preco:(p.precos&&p.precos.cliente)||0, qty:1});
+    const pi = getPrecoInfo(p);
+    cart.push({id:p.id, nome:p.nome, preco: pi.valor||0, qty:1});
   }
   renderCart();
   closeModal();
@@ -1073,6 +1107,7 @@ function tryAdminLogin(){
     document.getElementById('adminPanel').style.display='block';
     renderAdminList();
     renderCatAdmin();
+    loadAdminCadastros();
   } else {
     document.getElementById('adminLoginErr').textContent = 'Senha incorreta.';
   }
@@ -1382,7 +1417,14 @@ function handleUserBtn(){
   if(currentUser){
     const menu = document.createElement('div');
     menu.style.cssText = 'position:fixed;top:70px;right:24px;background:var(--white);border:1px solid var(--taupe-line);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:180px;';
-    menu.innerHTML = `
+    let statusLine = '';
+    if(customerProfile && customerProfile.statusAprovacao==='pendente'){
+      statusLine = `<div style="padding:10px 16px;font-size:11px;color:#8a8074;border-bottom:1px solid var(--taupe-line);">⏳ Cadastro profissional em análise</div>`;
+    } else if(customerProfile && customerProfile.nivelAprovado && customerProfile.nivelAprovado!=='cliente' && customerProfile.statusAprovacao==='aprovado'){
+      const label = customerProfile.nivelAprovado==='distribuidor' ? 'Distribuidor' : 'Profissional';
+      statusLine = `<div style="padding:10px 16px;font-size:11px;color:#1a8a3e;border-bottom:1px solid var(--taupe-line);">✔ Conta ${label} aprovada</div>`;
+    }
+    menu.innerHTML = statusLine + `
       <button onclick="openMyOrders();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;border-bottom:1px solid var(--taupe-line);">📦 Meus pedidos</button>
       <button onclick="doLogout();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;color:#8a2e2e;">Sair</button>`;
     document.body.appendChild(menu);
@@ -1404,9 +1446,18 @@ function showAuthModal(callback){
   document.getElementById('authPhone').value = '';
   document.getElementById('authCode').value = '';
   document.getElementById('authNome').value = '';
+  document.getElementById('authTipoConta').value = 'cliente';
+  document.getElementById('authSalao').value = '';
+  document.getElementById('authDoc').value = '';
+  document.getElementById('authProfDetails').style.display = 'none';
   clearAuthErr();
   document.getElementById('authOverlay').classList.add('open');
   setTimeout(()=>document.getElementById('authPhone').focus(), 200);
+}
+
+function toggleAuthTipoConta(){
+  const tipo = document.getElementById('authTipoConta').value;
+  document.getElementById('authProfDetails').style.display = tipo==='cliente' ? 'none' : 'block';
 }
 
 function closeAuthModal(){
@@ -1530,12 +1581,20 @@ async function verifyOTP(){
 async function completeRegistration(){
   const nome = document.getElementById('authNome').value.trim();
   if(!nome){ showAuthErr(3,'Informe seu nome.'); return; }
+  const tipoConta = document.getElementById('authTipoConta').value;
+  const salao = document.getElementById('authSalao').value.trim();
+  const documento = document.getElementById('authDoc').value.trim();
   const btn = document.querySelector('#authStep3 .auth-btn');
   btn.disabled=true; btn.textContent='Salvando…';
   try {
     const profile = {
       nome,
       whatsapp: _authPhone,
+      tipoConta,
+      nivelAprovado: 'cliente',
+      statusAprovacao: tipoConta==='cliente' ? 'aprovado' : 'pendente',
+      salao: salao || null,
+      documento: documento || null,
       criadoEm: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection('ar_clientes').doc(currentUser.uid).set(profile);
@@ -1545,6 +1604,7 @@ async function completeRegistration(){
     document.getElementById('publicView').style.display = 'block';
     document.getElementById('admin-view').classList.remove('open');
     renderGrid();
+    if(tipoConta!=='cliente') showToast('Cadastro enviado! Em análise pela nossa equipe.');
     if(afterLoginCb){ afterLoginCb(); afterLoginCb=null; }
   } catch(err){
     console.error(err);
@@ -1836,12 +1896,80 @@ function renderMyOrders(orders){
    ADMIN — ORDERS
 ═══════════════════════════════════════════ */
 function switchAdminTab(tab){
-  const isProd = tab==='produtos';
-  document.getElementById('adminProdutosSection').style.display = isProd?'block':'none';
-  document.getElementById('adminPedidosSection').style.display = isProd?'none':'block';
-  document.getElementById('tabProdutos').classList.toggle('active', isProd);
-  document.getElementById('tabPedidos').classList.toggle('active', !isProd);
-  if(!isProd) loadAdminOrders();
+  document.getElementById('adminProdutosSection').style.display = tab==='produtos'?'block':'none';
+  document.getElementById('adminPedidosSection').style.display = tab==='pedidos'?'block':'none';
+  document.getElementById('adminCadastrosSection').style.display = tab==='cadastros'?'block':'none';
+  document.getElementById('tabProdutos').classList.toggle('active', tab==='produtos');
+  document.getElementById('tabPedidos').classList.toggle('active', tab==='pedidos');
+  document.getElementById('tabCadastros').classList.toggle('active', tab==='cadastros');
+  if(tab==='pedidos') loadAdminOrders();
+  if(tab==='cadastros') loadAdminCadastros();
+}
+
+let adminCadastros = [];
+function loadAdminCadastros(){
+  const wrap = document.getElementById('adminCadastrosList');
+  wrap.innerHTML = '<div class="empty-state"><p>Carregando cadastros…</p></div>';
+  db.collection('ar_clientes').where('statusAprovacao','==','pendente').get()
+    .then(snap=>{
+      adminCadastros = snap.docs.map(d=>({id:d.id,...d.data()}));
+      renderAdminCadastros();
+      refreshPendingBadge();
+    })
+    .catch(err=>{
+      wrap.innerHTML = '<div class="empty-state"><p>Erro: '+err.message+'</p></div>';
+    });
+}
+
+function renderAdminCadastros(){
+  const wrap = document.getElementById('adminCadastrosList');
+  if(!adminCadastros.length){
+    wrap.innerHTML = '<div class="empty-state"><h3>Nenhum cadastro pendente</h3></div>';
+    return;
+  }
+  const tipoLabel = {cabeleireiro:'Cabeleireiro(a) / Profissional', distribuidor:'Distribuidor(a) / Revendedor'};
+  wrap.innerHTML = adminCadastros.map((c,i)=>{
+    return `<div class="admin-list-item" style="flex-wrap:wrap;align-items:center;gap:8px;">
+      <div class="meta" style="flex:1;min-width:180px;">
+        <div class="n">${c.nome||'—'} — ${tipoLabel[c.tipoConta]||c.tipoConta}</div>
+        <div class="c">${c.whatsapp||''}${c.salao?' · '+c.salao:''}${c.documento?' · '+c.documento:''}</div>
+      </div>
+      <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button onclick="approveCadastro('${c.id}',${i})" class="btn-pdf">✔ Aprovar</button>
+        <button onclick="rejectCadastro('${c.id}',${i})" class="btn-pdf">✕ Recusar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function approveCadastro(uid, idx){
+  const c = adminCadastros[idx];
+  db.collection('ar_clientes').doc(uid).update({
+    nivelAprovado: c.tipoConta,
+    statusAprovacao: 'aprovado'
+  }).then(()=>{
+    showStatus('Cadastro aprovado: agora vê preço de ' + c.tipoConta + '.', 'ok');
+    adminCadastros.splice(idx,1);
+    renderAdminCadastros();
+    refreshPendingBadge();
+  }).catch(err=>showStatus('Erro: '+err.message,'err'));
+}
+
+function rejectCadastro(uid, idx){
+  db.collection('ar_clientes').doc(uid).update({
+    statusAprovacao: 'recusado'
+  }).then(()=>{
+    showStatus('Cadastro recusado.', 'ok');
+    adminCadastros.splice(idx,1);
+    renderAdminCadastros();
+    refreshPendingBadge();
+  }).catch(err=>showStatus('Erro: '+err.message,'err'));
+}
+
+function refreshPendingBadge(){
+  const badge = document.getElementById('pendingCountBadge');
+  if(!badge) return;
+  badge.textContent = adminCadastros.length ? ` (${adminCadastros.length})` : '';
 }
 
 function loadAdminOrders(){
