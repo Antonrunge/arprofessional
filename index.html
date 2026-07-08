@@ -973,7 +973,7 @@ function setMainImg(src, el){
   el.classList.add('active');
 }
 function toYoutubeEmbed(url){
-  const m = url.match(/(?:youtu\.be\/|v=)([\w-]{6,})/);
+  const m = url.match(/(?:youtu\.be\/|v=|shorts\/)([\w-]{6,})/);
   return m ? `https://www.youtube.com/embed/${m[1]}` : url;
 }
 function closeModal(){
