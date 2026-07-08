@@ -560,6 +560,16 @@
       </div>
       <p style="font-size:12px;color:#8a8074;margin:-8px 0 16px;">Aprovar libera o preço de cabeleireiro/distribuidor para esse cliente. Enquanto pendente, ele compra normalmente com preço de cliente final.</p>
       <div id="adminCadastrosList"><div class="empty-state"><p>Clique em Atualizar para carregar.</p></div></div>
+
+      <div class="form-panel" style="margin-top:30px;">
+        <h3>Alterar qualificação de um cliente já aprovado</h3>
+        <p style="font-size:12px;color:#8a8074;margin:0 0 12px;">Busque por WhatsApp (mais confiável) ou nome para subir ou rebaixar a categoria a qualquer momento — ex: distribuidor virando cabeleireiro, ou cabeleireiro virando cliente.</p>
+        <div class="media-row">
+          <input id="clienteSearchInput" placeholder="WhatsApp com DDD, ou nome" style="flex:1;" onkeydown="if(event.key==='Enter')searchClientes()">
+          <button class="btn-primary" onclick="searchClientes()">Buscar</button>
+        </div>
+        <div id="clienteSearchResults" style="margin-top:14px;"></div>
+      </div>
     </div><!-- /adminCadastrosSection -->
 
   </div><!-- /adminPanel -->
@@ -645,10 +655,11 @@
         <option value="cabeleireiro">Sou cabeleireiro(a) / profissional</option>
         <option value="distribuidor">Sou distribuidor(a) / revendedor</option>
       </select>
+      <p style="font-size:11px;color:#8a8074;margin:-6px 0 10px;">Cliente final: sem valor mínimo · Cabeleireiro(a): compra mínima inicial de R$ 1.500,00 · Distribuidor(a): compra mínima inicial de R$ 3.000,00</p>
       <div id="authProfDetails" style="display:none;">
         <input class="auth-input" id="authSalao" type="text" placeholder="Nome do salão / empresa (opcional)">
         <input class="auth-input" id="authDoc" type="text" placeholder="CPF ou CNPJ (opcional)">
-        <p class="otp-note">Seu cadastro passa por uma aprovação rápida da nossa equipe. Enquanto isso, você já pode comprar com preço de cliente final.</p>
+        <p class="otp-note" id="authMinNote">Seu cadastro passa por uma aprovação rápida da nossa equipe. Enquanto isso, você já pode comprar com preço de cliente final.</p>
       </div>
       <button class="auth-btn" onclick="completeRegistration()">Concluir cadastro</button>
       <div class="auth-err" id="authErr3"></div>
@@ -662,10 +673,11 @@
     <button class="close-x" style="position:absolute;top:12px;right:12px;" onclick="closeUpgradeModal()">&times;</button>
     <h3>Virar cabeleireiro(a) ou distribuidor(a)</h3>
     <p class="sub">Solicite acesso aos preços especiais. Nossa equipe analisa e libera em breve.</p>
-    <select class="auth-input" id="upgradeTipo">
+    <select class="auth-input" id="upgradeTipo" onchange="toggleUpgradeTipo()">
       <option value="cabeleireiro">Sou cabeleireiro(a) / profissional</option>
       <option value="distribuidor">Sou distribuidor(a) / revendedor</option>
     </select>
+    <p style="font-size:11px;color:#8a8074;margin:-6px 0 10px;" id="upgradeMinNote">Compra mínima inicial de R$ 1.500,00.</p>
     <input class="auth-input" id="upgradeSalao" type="text" placeholder="Nome do salão / empresa (opcional)">
     <input class="auth-input" id="upgradeDoc" type="text" placeholder="CPF ou CNPJ (opcional)">
     <button class="auth-btn" onclick="submitUpgradeRequest()">Enviar solicitação</button>
@@ -1483,9 +1495,22 @@ function showAuthModal(callback){
   setTimeout(()=>document.getElementById('authPhone').focus(), 200);
 }
 
+const MINIMOS_COMPRA = {cabeleireiro:'R$ 1.500,00', distribuidor:'R$ 3.000,00'};
+
 function toggleAuthTipoConta(){
   const tipo = document.getElementById('authTipoConta').value;
   document.getElementById('authProfDetails').style.display = tipo==='cliente' ? 'none' : 'block';
+  const note = document.getElementById('authMinNote');
+  if(note){
+    note.innerHTML = tipo!=='cliente'
+      ? `Compra mínima inicial para essa modalidade: <strong>${MINIMOS_COMPRA[tipo]}</strong>. Seu cadastro passa por uma aprovação rápida da nossa equipe — enquanto isso, você já pode comprar com preço de cliente final.`
+      : '';
+  }
+}
+
+function toggleUpgradeTipo(){
+  const tipo = document.getElementById('upgradeTipo').value;
+  document.getElementById('upgradeMinNote').textContent = 'Compra mínima inicial de ' + MINIMOS_COMPRA[tipo] + '.';
 }
 
 function openUpgradeModal(){
@@ -1493,6 +1518,7 @@ function openUpgradeModal(){
   document.getElementById('upgradeSalao').value = (customerProfile && customerProfile.salao) || '';
   document.getElementById('upgradeDoc').value = (customerProfile && customerProfile.documento) || '';
   document.getElementById('upgradeErr').textContent = '';
+  toggleUpgradeTipo();
   document.getElementById('upgradeOverlay').classList.add('open');
 }
 function closeUpgradeModal(){
@@ -2049,6 +2075,74 @@ function refreshPendingBadge(){
   const badge = document.getElementById('pendingCountBadge');
   if(!badge) return;
   badge.textContent = adminCadastros.length ? ` (${adminCadastros.length})` : '';
+}
+
+let _clienteSearchResults = [];
+async function searchClientes(){
+  const wrap = document.getElementById('clienteSearchResults');
+  const term = document.getElementById('clienteSearchInput').value.trim();
+  if(!term){ wrap.innerHTML=''; return; }
+  wrap.innerHTML = '<div class="empty-state"><p>Buscando…</p></div>';
+  try {
+    const digits = term.replace(/\D/g,'');
+    const queries = [];
+    if(digits.length>=4){
+      const wa = '+55' + digits;
+      queries.push(db.collection('ar_clientes').where('whatsapp','>=',wa).where('whatsapp','<=',wa+'\uf8ff').get());
+    }
+    if(term.length>=2){
+      queries.push(db.collection('ar_clientes').where('nome','>=',term).where('nome','<=',term+'\uf8ff').get());
+    }
+    if(!queries.length){ wrap.innerHTML = '<div class="empty-state"><p>Digite pelo menos 2 letras ou 4 números.</p></div>'; return; }
+    const snaps = await Promise.all(queries);
+    const map = {};
+    snaps.forEach(snap=> snap.docs.forEach(d=>{ map[d.id] = Object.assign({id:d.id}, d.data()); }));
+    _clienteSearchResults = Object.values(map);
+    renderClienteSearchResults();
+  } catch(err){
+    wrap.innerHTML = '<div class="empty-state"><p>Erro: '+err.message+'</p></div>';
+  }
+}
+
+function renderClienteSearchResults(){
+  const wrap = document.getElementById('clienteSearchResults');
+  if(!_clienteSearchResults.length){
+    wrap.innerHTML = '<div class="empty-state"><p>Nenhum cliente encontrado. Tente buscar só pelo WhatsApp (com DDD, sem espaços).</p></div>';
+    return;
+  }
+  const nivelLabel = {cliente:'Cliente final', cabeleireiro:'Cabeleireiro(a)', distribuidor:'Distribuidor(a)'};
+  wrap.innerHTML = _clienteSearchResults.map((c,i)=>{
+    const nivel = c.nivelAprovado || 'cliente';
+    return `<div class="admin-list-item" style="flex-wrap:wrap;align-items:center;gap:8px;">
+      <div class="meta" style="flex:1;min-width:180px;">
+        <div class="n">${c.nome||'—'}</div>
+        <div class="c">${c.whatsapp||''} · atualmente: ${nivelLabel[nivel]||nivel}</div>
+      </div>
+      <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <select id="nivelSelect_${i}">
+          <option value="cliente" ${nivel==='cliente'?'selected':''}>Cliente final</option>
+          <option value="cabeleireiro" ${nivel==='cabeleireiro'?'selected':''}>Cabeleireiro(a)</option>
+          <option value="distribuidor" ${nivel==='distribuidor'?'selected':''}>Distribuidor(a)</option>
+        </select>
+        <button onclick="setClienteNivel('${c.id}',${i})" class="btn-pdf">Salvar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setClienteNivel(uid, idx){
+  const sel = document.getElementById('nivelSelect_'+idx);
+  const novoNivel = sel.value;
+  db.collection('ar_clientes').doc(uid).update({
+    nivelAprovado: novoNivel,
+    statusAprovacao: 'aprovado',
+    upgradeStatus: null,
+    upgradeSolicitado: null
+  }).then(()=>{
+    showStatus('Qualificação atualizada para ' + novoNivel + '.', 'ok');
+    if(_clienteSearchResults[idx]) _clienteSearchResults[idx].nivelAprovado = novoNivel;
+    renderClienteSearchResults();
+  }).catch(err=>showStatus('Erro: '+err.message,'err'));
 }
 
 function loadAdminOrders(){
