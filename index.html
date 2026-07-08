@@ -769,7 +769,7 @@ let _authPhone = '';   // telefone digitado no step1
     const s = JSON.parse(localStorage.getItem('ar_session')||'null');
     if(s && s.expiry > Date.now()){
       currentUser = {uid: s.uid, phoneNumber: s.phone};
-      loadCustomerProfile(s.uid).then(()=>{ updateHeaderAuth(); renderGrid(); });
+      attachCustomerProfileListener(s.uid);
     }
   } catch(e){}
 })();
@@ -1476,8 +1476,10 @@ function handleUserBtn(){
 
 function doLogout(){
   localStorage.removeItem('ar_session');
+  if(_customerProfileUnsub){ _customerProfileUnsub(); _customerProfileUnsub = null; }
   currentUser = null; customerProfile = null;
   updateHeaderAuth();
+  renderGrid();
 }
 
 function showAuthModal(callback){
@@ -1656,6 +1658,7 @@ async function verifyOTP(){
       setTimeout(()=>document.getElementById('authNome').focus(), 200);
     } else {
       customerProfile = clienteSnap.data();
+      attachCustomerProfileListener(uid);
       closeAuthModal();
       updateHeaderAuth();
       // garante vitrine visível e produtos recarregados
@@ -1693,6 +1696,7 @@ async function completeRegistration(){
     };
     await db.collection('ar_clientes').doc(currentUser.uid).set(profile);
     customerProfile = profile;
+    attachCustomerProfileListener(currentUser.uid);
     closeAuthModal();
     updateHeaderAuth();
     document.getElementById('publicView').style.display = 'block';
@@ -1708,6 +1712,18 @@ async function completeRegistration(){
   }
 }
 
+
+let _customerProfileUnsub = null;
+function attachCustomerProfileListener(uid){
+  if(_customerProfileUnsub){ _customerProfileUnsub(); _customerProfileUnsub = null; }
+  _customerProfileUnsub = db.collection('ar_clientes').doc(uid).onSnapshot(doc=>{
+    if(doc.exists){
+      customerProfile = doc.data();
+      updateHeaderAuth();
+      renderGrid();
+    }
+  }, err=>console.error('customerProfile listener:', err));
+}
 
 async function loadCustomerProfile(uid){
   try {
