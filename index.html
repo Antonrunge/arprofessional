@@ -656,6 +656,23 @@
   </div>
 </div>
 
+<!-- ── Upgrade Request Modal ── -->
+<div class="overlay" id="upgradeOverlay" onclick="if(event.target===this)closeUpgradeModal()">
+  <div class="auth-box">
+    <button class="close-x" style="position:absolute;top:12px;right:12px;" onclick="closeUpgradeModal()">&times;</button>
+    <h3>Virar cabeleireiro(a) ou distribuidor(a)</h3>
+    <p class="sub">Solicite acesso aos preços especiais. Nossa equipe analisa e libera em breve.</p>
+    <select class="auth-input" id="upgradeTipo">
+      <option value="cabeleireiro">Sou cabeleireiro(a) / profissional</option>
+      <option value="distribuidor">Sou distribuidor(a) / revendedor</option>
+    </select>
+    <input class="auth-input" id="upgradeSalao" type="text" placeholder="Nome do salão / empresa (opcional)">
+    <input class="auth-input" id="upgradeDoc" type="text" placeholder="CPF ou CNPJ (opcional)">
+    <button class="auth-btn" onclick="submitUpgradeRequest()">Enviar solicitação</button>
+    <div class="auth-err" id="upgradeErr"></div>
+  </div>
+</div>
+
 <!-- ── Checkout Modal ── -->
 <div class="overlay" id="checkoutOverlay" onclick="if(event.target===this)closeCheckoutModal()">
   <div class="checkout-box">
@@ -1416,15 +1433,26 @@ function updateHeaderAuth(){
 function handleUserBtn(){
   if(currentUser){
     const menu = document.createElement('div');
-    menu.style.cssText = 'position:fixed;top:70px;right:24px;background:var(--white);border:1px solid var(--taupe-line);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:180px;';
-    let statusLine = '';
+    menu.style.cssText = 'position:fixed;top:70px;right:24px;background:var(--white);border:1px solid var(--taupe-line);border-radius:var(--radius);z-index:200;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:200px;';
+    const nivel = customerProfile ? (customerProfile.nivelAprovado||'cliente') : 'cliente';
+    const nivelLabel = {cliente:'Cliente final', cabeleireiro:'Cabeleireiro(a) / Profissional', distribuidor:'Distribuidor(a) / Revendedor'};
+    let statusBlock = '';
+    let showUpgradeBtn = false;
     if(customerProfile && customerProfile.statusAprovacao==='pendente'){
-      statusLine = `<div style="padding:10px 16px;font-size:11px;color:#8a8074;border-bottom:1px solid var(--taupe-line);">⏳ Cadastro profissional em análise</div>`;
-    } else if(customerProfile && customerProfile.nivelAprovado && customerProfile.nivelAprovado!=='cliente' && customerProfile.statusAprovacao==='aprovado'){
-      const label = customerProfile.nivelAprovado==='distribuidor' ? 'Distribuidor' : 'Profissional';
-      statusLine = `<div style="padding:10px 16px;font-size:11px;color:#1a8a3e;border-bottom:1px solid var(--taupe-line);">✔ Conta ${label} aprovada</div>`;
+      statusBlock = `<div style="padding:10px 16px;font-size:11px;color:#8a8074;border-bottom:1px solid var(--taupe-line);">⏳ Cadastro profissional em análise<br>Comprando como: Cliente final</div>`;
+    } else if(customerProfile && customerProfile.upgradeStatus==='pendente'){
+      const alvoLabel = nivelLabel[customerProfile.upgradeSolicitado] || customerProfile.upgradeSolicitado;
+      statusBlock = `<div style="padding:10px 16px;font-size:11px;color:#8a8074;border-bottom:1px solid var(--taupe-line);">⏳ Solicitação para ${alvoLabel} em análise<br>Comprando como: ${nivelLabel[nivel]}</div>`;
+    } else if(nivel!=='cliente'){
+      statusBlock = `<div style="padding:10px 16px;font-size:11px;color:#1a8a3e;border-bottom:1px solid var(--taupe-line);">✔ Comprando como: ${nivelLabel[nivel]}</div>`;
+    } else {
+      statusBlock = `<div style="padding:10px 16px;font-size:11px;color:#8a8074;border-bottom:1px solid var(--taupe-line);">Comprando como: Cliente final</div>`;
+      showUpgradeBtn = true;
     }
-    menu.innerHTML = statusLine + `
+    const upgradeBtnHtml = showUpgradeBtn
+      ? `<button onclick="closeAccountMenuAndOpenUpgrade(this)" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;color:var(--bronze-dark);border-bottom:1px solid var(--taupe-line);">⭐ Virar cabeleireiro(a)/distribuidor(a)</button>`
+      : '';
+    menu.innerHTML = statusBlock + upgradeBtnHtml + `
       <button onclick="openMyOrders();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;border-bottom:1px solid var(--taupe-line);">📦 Meus pedidos</button>
       <button onclick="doLogout();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;color:#8a2e2e;">Sair</button>`;
     document.body.appendChild(menu);
@@ -1458,6 +1486,46 @@ function showAuthModal(callback){
 function toggleAuthTipoConta(){
   const tipo = document.getElementById('authTipoConta').value;
   document.getElementById('authProfDetails').style.display = tipo==='cliente' ? 'none' : 'block';
+}
+
+function openUpgradeModal(){
+  document.getElementById('upgradeTipo').value = 'cabeleireiro';
+  document.getElementById('upgradeSalao').value = (customerProfile && customerProfile.salao) || '';
+  document.getElementById('upgradeDoc').value = (customerProfile && customerProfile.documento) || '';
+  document.getElementById('upgradeErr').textContent = '';
+  document.getElementById('upgradeOverlay').classList.add('open');
+}
+function closeUpgradeModal(){
+  document.getElementById('upgradeOverlay').classList.remove('open');
+}
+function closeAccountMenuAndOpenUpgrade(btn){
+  const menu = btn.closest('div');
+  if(menu) menu.remove();
+  openUpgradeModal();
+}
+async function submitUpgradeRequest(){
+  if(!currentUser) return;
+  const tipo = document.getElementById('upgradeTipo').value;
+  const salao = document.getElementById('upgradeSalao').value.trim();
+  const documento = document.getElementById('upgradeDoc').value.trim();
+  const btn = document.querySelector('#upgradeOverlay .auth-btn');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    const updates = {
+      upgradeSolicitado: tipo,
+      upgradeStatus: 'pendente',
+      salao: salao || (customerProfile && customerProfile.salao) || null,
+      documento: documento || (customerProfile && customerProfile.documento) || null
+    };
+    await db.collection('ar_clientes').doc(currentUser.uid).update(updates);
+    customerProfile = Object.assign({}, customerProfile, updates);
+    closeUpgradeModal();
+    showToast('Solicitação enviada! Em análise pela nossa equipe.');
+  } catch(err){
+    document.getElementById('upgradeErr').textContent = 'Erro: ' + err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Enviar solicitação';
+  }
 }
 
 function closeAuthModal(){
@@ -1910,15 +1978,21 @@ let adminCadastros = [];
 function loadAdminCadastros(){
   const wrap = document.getElementById('adminCadastrosList');
   wrap.innerHTML = '<div class="empty-state"><p>Carregando cadastros…</p></div>';
-  db.collection('ar_clientes').where('statusAprovacao','==','pendente').get()
-    .then(snap=>{
-      adminCadastros = snap.docs.map(d=>({id:d.id,...d.data()}));
-      renderAdminCadastros();
-      refreshPendingBadge();
-    })
-    .catch(err=>{
-      wrap.innerHTML = '<div class="empty-state"><p>Erro: '+err.message+'</p></div>';
+  Promise.all([
+    db.collection('ar_clientes').where('statusAprovacao','==','pendente').get(),
+    db.collection('ar_clientes').where('upgradeStatus','==','pendente').get()
+  ]).then(([snapNovos, snapUpgrade])=>{
+    const map = {};
+    snapNovos.docs.forEach(d=>{ map[d.id] = Object.assign({id:d.id, origem:'novo'}, d.data()); });
+    snapUpgrade.docs.forEach(d=>{
+      if(!map[d.id]) map[d.id] = Object.assign({id:d.id, origem:'upgrade'}, d.data());
     });
+    adminCadastros = Object.values(map);
+    renderAdminCadastros();
+    refreshPendingBadge();
+  }).catch(err=>{
+    wrap.innerHTML = '<div class="empty-state"><p>Erro: '+err.message+'</p></div>';
+  });
 }
 
 function renderAdminCadastros(){
@@ -1927,12 +2001,16 @@ function renderAdminCadastros(){
     wrap.innerHTML = '<div class="empty-state"><h3>Nenhum cadastro pendente</h3></div>';
     return;
   }
-  const tipoLabel = {cabeleireiro:'Cabeleireiro(a) / Profissional', distribuidor:'Distribuidor(a) / Revendedor'};
+  const tipoLabel = {cliente:'Cliente final', cabeleireiro:'Cabeleireiro(a) / Profissional', distribuidor:'Distribuidor(a) / Revendedor'};
   wrap.innerHTML = adminCadastros.map((c,i)=>{
+    const alvo = c.origem==='upgrade' ? c.upgradeSolicitado : c.tipoConta;
+    const origemLabel = c.origem==='upgrade'
+      ? `Upgrade solicitado · atualmente ${tipoLabel[c.nivelAprovado||'cliente']}`
+      : `Novo cadastro`;
     return `<div class="admin-list-item" style="flex-wrap:wrap;align-items:center;gap:8px;">
       <div class="meta" style="flex:1;min-width:180px;">
-        <div class="n">${c.nome||'—'} — ${tipoLabel[c.tipoConta]||c.tipoConta}</div>
-        <div class="c">${c.whatsapp||''}${c.salao?' · '+c.salao:''}${c.documento?' · '+c.documento:''}</div>
+        <div class="n">${c.nome||'—'} — deseja ${tipoLabel[alvo]||alvo}</div>
+        <div class="c">${origemLabel} · ${c.whatsapp||''}${c.salao?' · '+c.salao:''}${c.documento?' · '+c.documento:''}</div>
       </div>
       <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap;">
         <button onclick="approveCadastro('${c.id}',${i})" class="btn-pdf">✔ Aprovar</button>
@@ -1944,11 +2022,12 @@ function renderAdminCadastros(){
 
 function approveCadastro(uid, idx){
   const c = adminCadastros[idx];
-  db.collection('ar_clientes').doc(uid).update({
-    nivelAprovado: c.tipoConta,
-    statusAprovacao: 'aprovado'
-  }).then(()=>{
-    showStatus('Cadastro aprovado: agora vê preço de ' + c.tipoConta + '.', 'ok');
+  const alvo = c.origem==='upgrade' ? c.upgradeSolicitado : c.tipoConta;
+  const updates = { nivelAprovado: alvo };
+  if(c.origem==='upgrade'){ updates.upgradeStatus = 'aprovado'; }
+  else { updates.statusAprovacao = 'aprovado'; }
+  db.collection('ar_clientes').doc(uid).update(updates).then(()=>{
+    showStatus('Cadastro aprovado: agora vê preço de ' + alvo + '.', 'ok');
     adminCadastros.splice(idx,1);
     renderAdminCadastros();
     refreshPendingBadge();
@@ -1956,10 +2035,10 @@ function approveCadastro(uid, idx){
 }
 
 function rejectCadastro(uid, idx){
-  db.collection('ar_clientes').doc(uid).update({
-    statusAprovacao: 'recusado'
-  }).then(()=>{
-    showStatus('Cadastro recusado.', 'ok');
+  const c = adminCadastros[idx];
+  const updates = c.origem==='upgrade' ? {upgradeStatus:'recusado'} : {statusAprovacao:'recusado'};
+  db.collection('ar_clientes').doc(uid).update(updates).then(()=>{
+    showStatus('Solicitação recusada.', 'ok');
     adminCadastros.splice(idx,1);
     renderAdminCadastros();
     refreshPendingBadge();
