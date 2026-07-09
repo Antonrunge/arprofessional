@@ -734,8 +734,10 @@
     <div class="icon">✅</div>
     <h3>Pedido registrado!</h3>
     <p>Seu pedido foi salvo. O PDF foi gerado e baixado automaticamente.<br>Nossa equipe já recebeu a notificação pelo WhatsApp.</p>
-    <p id="successOrderId" style="font-size:12px;color:#8a8074;margin-bottom:20px;"></p>
-    <button class="auth-btn" onclick="closeSuccessModal()">Fechar</button>
+    <p id="successOrderId" style="font-size:12px;color:#8a8074;margin-bottom:12px;"></p>
+    <button class="auth-btn" id="btnPagarMP" style="background:#009ee3;" onclick="pagarComMercadoPago()">💳 Pagar agora com Mercado Pago</button>
+    <p style="font-size:11px;color:#8a8074;margin:8px 0 12px;">Ou combine o pagamento direto com a gente pelo WhatsApp — o pedido já foi enviado de qualquer forma.</p>
+    <button class="btn-secondary" style="width:100%;" onclick="closeSuccessModal()">Fechar</button>
     <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="openMyOrders()">Ver meus pedidos</button>
   </div>
 </div>
@@ -755,6 +757,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 
@@ -778,9 +781,11 @@ const ADMIN_PASSWORD = "748508"; // proteção simples client-side — trocar an
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const storage = firebase.storage();
+const functions = firebase.app().functions('southamerica-east1');
 
 // ── Auth state (sessão local, verificação via Firestore) ──
 let currentUser = null;
+let lastOrderId = null;
 let customerProfile = null;
 let afterLoginCb = null;
 let adminOrders = [];
@@ -1880,6 +1885,7 @@ async function confirmOrder(){
 
     // tela de sucesso
     document.getElementById('successOrderId').textContent = 'Pedido #' + order.id.substring(0,8).toUpperCase();
+    lastOrderId = order.id;
     document.getElementById('successOverlay').classList.add('open');
 
   } catch(err){
@@ -1891,6 +1897,46 @@ async function confirmOrder(){
 
 function closeSuccessModal(){
   document.getElementById('successOverlay').classList.remove('open');
+}
+
+async function pagarComMercadoPago(){
+  if(!lastOrderId){ alert('Pedido não encontrado.'); return; }
+  const btn = document.getElementById('btnPagarMP');
+  const textoOriginal = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = 'Gerando link de pagamento…'; }
+  try {
+    const criarPreferencia = functions.httpsCallable('criarPreferenciaPagamento');
+    const result = await criarPreferencia({ pedidoId: lastOrderId });
+    if(result.data && result.data.initPoint){
+      window.location.href = result.data.initPoint;
+    } else {
+      throw new Error('Link de pagamento não retornado.');
+    }
+  } catch(err){
+    console.error(err);
+    alert('Não foi possível gerar o pagamento agora. Tente novamente ou combine direto pelo WhatsApp.\n\n' + (err.message||''));
+    if(btn){ btn.disabled = false; btn.textContent = textoOriginal; }
+  }
+}
+
+/* Trata o retorno do Mercado Pago (sucesso/pendente/falha) via hash da URL */
+function checkPaymentReturnRoute(){
+  const hash = location.hash;
+  if(hash.startsWith('#pagamento-sucesso-')){
+    showPaymentReturnMessage('✅ Pagamento aprovado!', 'Seu pagamento foi confirmado. Obrigado pela preferência!');
+  } else if(hash.startsWith('#pagamento-pendente-')){
+    showPaymentReturnMessage('⏳ Pagamento em análise', 'Assim que for confirmado, atualizamos seu pedido automaticamente.');
+  } else if(hash.startsWith('#pagamento-falhou-')){
+    showPaymentReturnMessage('❌ Pagamento não concluído', 'Você pode tentar novamente em "Meus pedidos", ou combinar direto pelo WhatsApp.');
+  }
+}
+function showPaymentReturnMessage(titulo, texto){
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--white);border:1px solid var(--taupe-line);border-radius:var(--radius);padding:16px 20px;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:90vw;text-align:center;';
+  el.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">${titulo}</div><div style="font-size:13px;color:#8a8074;">${texto}</div>`;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 6000);
+  history.replaceState(null, '', location.pathname);
 }
 
 
@@ -2057,6 +2103,8 @@ function renderMyOrders(orders){
     const status = o.status||'pendente';
     const mini = (o.itens||[]).slice(0,2).map(i=>`${i.qty}x ${i.nome}`).join(', ')
       + ((o.itens||[]).length>2 ? ` +${o.itens.length-2}` : '');
+    const jaPago = o.statusPagamento === 'pago';
+    const btnPagar = jaPago ? '' : `<button class="btn-pdf" style="background:#009ee3;color:#fff;" onclick="lastOrderId='${o.id}';pagarComMercadoPago();">💳 Pagar</button>`;
     return `<div class="order-card">
       <div class="order-card-head">
         <span class="oid">#${ordNum}</span>
@@ -2066,7 +2114,10 @@ function renderMyOrders(orders){
       <div class="order-items-mini">${mini}</div>
       <div class="order-card-foot">
         <span class="order-total">${formatBRL(o.total)}</span>
-        <button class="btn-pdf" onclick="generateAndDownloadPDF(myOrderCache[${i}])">⬇ PDF</button>
+        <div style="display:flex;gap:6px;">
+          ${btnPagar}
+          <button class="btn-pdf" onclick="generateAndDownloadPDF(myOrderCache[${i}])">⬇ PDF</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -2487,6 +2538,7 @@ loadProducts();
 loadHeroConfig();
 checkRoute();
 checkShareRoute();
+checkPaymentReturnRoute();
 window.addEventListener('hashchange', checkShareRoute);
 
 if('serviceWorker' in navigator){
