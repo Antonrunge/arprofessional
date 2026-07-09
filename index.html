@@ -733,11 +733,12 @@
   <div class="success-box">
     <div class="icon">✅</div>
     <h3>Pedido registrado!</h3>
-    <p>Seu pedido foi salvo. O PDF foi gerado e baixado automaticamente.<br>Nossa equipe já recebeu a notificação pelo WhatsApp.</p>
+    <p>Seu pedido foi salvo e nossa equipe já recebeu a notificação pelo WhatsApp.</p>
     <p id="successOrderId" style="font-size:12px;color:#8a8074;margin-bottom:12px;"></p>
     <button class="auth-btn" id="btnPagarMP" style="background:#009ee3;" onclick="pagarComMercadoPago()">💳 Pagar agora com Mercado Pago</button>
     <p style="font-size:11px;color:#8a8074;margin:8px 0 12px;">Ou combine o pagamento direto com a gente pelo WhatsApp — o pedido já foi enviado de qualquer forma.</p>
-    <button class="btn-secondary" style="width:100%;" onclick="closeSuccessModal()">Fechar</button>
+    <button class="btn-secondary" style="width:100%;" onclick="generateAndDownloadPDF(lastOrderObj)">⬇ Baixar PDF do pedido</button>
+    <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="closeSuccessModal()">Fechar</button>
     <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="openMyOrders()">Ver meus pedidos</button>
   </div>
 </div>
@@ -786,6 +787,7 @@ const functions = firebase.app().functions('southamerica-east1');
 // ── Auth state (sessão local, verificação via Firestore) ──
 let currentUser = null;
 let lastOrderId = null;
+let lastOrderObj = null;
 let customerProfile = null;
 let afterLoginCb = null;
 let adminOrders = [];
@@ -1879,13 +1881,13 @@ async function confirmOrder(){
     renderCart();
     closeCheckoutModal();
 
-    // PDF + WhatsApp
-    generateAndDownloadPDF(order);
+    // notifica a equipe pelo WhatsApp (PDF fica disponível sob demanda, não baixa sozinho)
     notifyWhatsAppBusiness(order);
 
     // tela de sucesso
     document.getElementById('successOrderId').textContent = 'Pedido #' + order.id.substring(0,8).toUpperCase();
     lastOrderId = order.id;
+    lastOrderObj = order;
     document.getElementById('successOverlay').classList.add('open');
 
   } catch(err){
