@@ -522,6 +522,7 @@
       </div>
       <div class="save-row" style="margin-top:10px;">
         <button class="btn-primary" onclick="saveCatEdits()">Salvar nomes editados</button>
+        <button class="btn-secondary" onclick="applyCategoriasPadrao()">Aplicar sequência padrão (Todos, Home Care, Hidratação, Nutrição, Reconstrução, Finalizadores, Progressivas, Para Salões)</button>
       </div>
       <div id="catAdminStatus" style="margin-top:8px;"></div>
     </div>
@@ -778,7 +779,7 @@ let _authPhone = '';   // telefone digitado no step1
   } catch(e){}
 })();
 
-let CATEGORIES = ["Todos","Tratamentos","Progressivas","Home Care","Reconstrução","Finalizadores","Kits","Promoções"];
+let CATEGORIES = ["Todos","Home Care","Hidratação","Nutrição","Reconstrução","Finalizadores","Progressivas","Para Salões"];
 
 let PRODUCTS = [];
 let currentCategory = "Todos";
@@ -864,6 +865,10 @@ function saveCatEdits(){
   const lista = Array.from(inputs).map(i=>i.value.trim()).filter(Boolean);
   saveCategories(lista);
 }
+function applyCategoriasPadrao(){
+  const padrao = ["Todos","Home Care","Hidratação","Nutrição","Reconstrução","Finalizadores","Progressivas","Para Salões"];
+  saveCategories(padrao);
+}
 function showAdminCatStatus(msg, type){
   const el = document.getElementById('catAdminStatus');
   if(!el) return;
@@ -942,9 +947,19 @@ function loadProducts(){
 }
 
 /* ---------------- public grid ---------------- */
+function getCategoriasProduto(p){
+  if(p.categorias && p.categorias.length) return p.categorias;
+  return p.categoria ? [p.categoria] : [];
+}
+function getOrdemProduto(p, cat){
+  if(cat === 'Todos') return (p.ordemTodos!=null ? p.ordemTodos : 999);
+  return (p.ordens && p.ordens[cat]!=null) ? p.ordens[cat] : 999;
+}
 function renderGrid(){
   const grid = document.getElementById('productGrid');
-  const list = PRODUCTS.filter(p => currentCategory==='Todos' || p.categoria===currentCategory);
+  const list = PRODUCTS.filter(p => currentCategory==='Todos' || getCategoriasProduto(p).includes(currentCategory))
+    .slice()
+    .sort((a,b)=> getOrdemProduto(a,currentCategory) - getOrdemProduto(b,currentCategory));
   if(list.length===0){
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><h3>Nenhum produto aqui ainda</h3><p>Assim que cadastrar produtos nesta categoria, eles aparecem aqui.</p></div>`;
     return;
@@ -959,7 +974,7 @@ function renderGrid(){
     <div class="card" onclick="openModal('${p.id}')">
       <div class="thumb">${img}<button class="share-btn" title="Copiar link" onclick="shareProduct('${p.id}',event)">🔗</button></div>
       <div class="body">
-        <div class="cat">${p.categoria||''}</div>
+        <div class="cat">${getCategoriasProduto(p).join(', ')}</div>
         <h3>${p.nome}</h3>
         ${priceBlock}
       </div>
@@ -1010,7 +1025,7 @@ function openModal(id){
     ? `<button class="add-cart" onclick="addToCart('${p.id}')">Adicionar ao carrinho</button>`
     : `<button class="add-cart consult" onclick="consultWhatsApp('${p.id}')">Consultar via WhatsApp</button>`;
   document.getElementById('modalInfo').innerHTML = `
-    <div class="cat">${p.categoria||''}</div>
+    <div class="cat">${getCategoriasProduto(p).join(', ')}</div>
     <h2>${p.nome}</h2>
     ${priceBlockModal}
     ${p.descricaoCompleta?`<div class="desc">${p.descricaoCompleta}</div>`:''}
@@ -1159,7 +1174,7 @@ function renderAdminList(){
       ${img}
       <div class="meta">
         <div class="n">${p.nome}</div>
-        <div class="c">${p.categoria||'sem categoria'} · Cliente ${p.precos&&p.precos.cliente?formatBRL(p.precos.cliente):'Sob consulta'}</div>
+        <div class="c">${getCategoriasProduto(p).join(', ')||'sem categoria'} · Cliente ${p.precos&&p.precos.cliente?formatBRL(p.precos.cliente):'Sob consulta'}</div>
       </div>
       <div class="acts">
         <button onclick="openProductForm('${p.id}')">Editar</button>
@@ -1216,10 +1231,9 @@ function openProductForm(id){
             <div><label>Marca</label><input id="f_marca" value="${esc((p&&p.marca)||'')}"></div>
           </div>
           <div class="form-row">
-            <div><label>Categoria</label>
-              <select id="f_categoria">
-                ${CATEGORIES.filter(c=>c!=='Todos').map(c=>`<option ${p&&p.categoria===c?'selected':''}>${c}</option>`).join('')}
-              </select>
+            <div style="flex:1;">
+              <label>Ordem na aba "Todos"</label>
+              <input id="f_ordem_todos" type="number" step="1" style="max-width:120px;" value="${p&&p.ordemTodos!=null?p.ordemTodos:''}" placeholder="ex: 10">
             </div>
             <div><label>Destaque?</label>
               <select id="f_destaque">
@@ -1228,6 +1242,24 @@ function openProductForm(id){
               </select>
             </div>
           </div>
+          <div class="form-row full"><div>
+            <label>Também aparece nas abas: (marque quantas quiser, e defina a ordem em cada uma)</label>
+            <div id="f_categorias_wrap" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;">
+              ${(()=>{
+                const catsAtuais = (p && p.categorias) ? p.categorias : (p && p.categoria ? [p.categoria] : []);
+                const ordensAtuais = (p && p.ordens) || {};
+                return CATEGORIES.filter(c=>c!=='Todos').map(c=>{
+                  const marcado = catsAtuais.includes(c);
+                  return `<div style="display:flex;align-items:center;gap:8px;">
+                    <label style="display:flex;align-items:center;gap:6px;min-width:160px;font-size:13px;">
+                      <input type="checkbox" class="f_cat_chk" value="${c}" ${marcado?'checked':''} onchange="toggleCatOrdemField(this)"> ${c}
+                    </label>
+                    <input type="number" class="f_cat_ordem" data-cat="${c}" placeholder="ordem" style="width:80px;display:${marcado?'inline-block':'none'};" value="${ordensAtuais[c]!=null?ordensAtuais[c]:''}">
+                  </div>`;
+                }).join('');
+              })()}
+            </div>
+          </div></div>
           <div class="form-row full"><div>
             <label>Descrição completa</label>
             <div class="rich-toolbar">
@@ -1324,6 +1356,12 @@ function uploadFile(input, type){
 }
 function closeForm(){ document.getElementById('formPanel').innerHTML=''; editingId=null; }
 
+function toggleCatOrdemField(chk){
+  const row = chk.closest('div');
+  const ordemInput = row.querySelector(`.f_cat_ordem[data-cat="${CSS.escape(chk.value)}"]`);
+  if(ordemInput) ordemInput.style.display = chk.checked ? 'inline-block' : 'none';
+}
+
 function saveProduct(){
   const nome = document.getElementById('f_nome').value.trim();
   if(!nome){ showStatus('Informe o nome do produto.', 'err'); return; }
@@ -1332,11 +1370,23 @@ function saveProduct(){
   const videos = Array.from(document.querySelectorAll('.video-input')).map(i=>i.value.trim()).filter(Boolean);
   const beneficios = document.getElementById('f_beneficios').value.split('\n').map(s=>s.trim()).filter(Boolean);
 
+  const categorias = Array.from(document.querySelectorAll('.f_cat_chk:checked')).map(el=>el.value);
+  const ordens = {};
+  document.querySelectorAll('.f_cat_ordem').forEach(inp=>{
+    if(inp.style.display !== 'none' && inp.value !== ''){
+      ordens[inp.dataset.cat] = parseInt(inp.value, 10) || 999;
+    }
+  });
+  const ordemTodosRaw = document.getElementById('f_ordem_todos').value;
+  const ordemTodos = ordemTodosRaw !== '' ? (parseInt(ordemTodosRaw, 10) || 999) : 999;
+
   const data = {
     nome,
     codigo: document.getElementById('f_codigo').value.trim(),
     marca: document.getElementById('f_marca').value.trim(),
-    categoria: document.getElementById('f_categoria').value,
+    categorias,
+    ordens,
+    ordemTodos,
     destaque: document.getElementById('f_destaque').value === 'true',
     descricaoCompleta: document.getElementById('f_desc').innerHTML.trim(),
     beneficios,
