@@ -592,6 +592,15 @@
         <h2>Estatísticas gerais</h2>
         <button class="btn-secondary" onclick="loadAdminOrders();loadEstatisticas();">🔄 Atualizar</button>
       </div>
+      <div class="form-panel" style="margin-bottom:24px;">
+        <h3>📣 Enviar notificação push de promoção</h3>
+        <p style="font-size:12px;color:#8a8074;margin:0 0 12px;">Vai pra todo mundo que já ativou notificações no navegador/celular.</p>
+        <input id="notifTitulo" class="foto-input" placeholder="Título (ex: Promoção relâmpago!)" style="margin-bottom:8px;">
+        <textarea id="notifMensagem" placeholder="Mensagem (ex: 20% off em progressivas até domingo)" style="width:100%;min-height:60px;padding:10px;border:1px solid var(--taupe-line);border-radius:8px;font-family:inherit;margin-bottom:8px;"></textarea>
+        <input id="notifChave" type="password" class="foto-input" placeholder="Senha de notificações" style="margin-bottom:8px;">
+        <button class="btn-primary" onclick="enviarPromocao()">Enviar notificação</button>
+        <div id="notifStatus" style="margin-top:8px;"></div>
+      </div>
       <div id="adminEstatisticasWrap"><div class="empty-state"><p>Carregando…</p></div></div>
     </div><!-- /adminEstatisticasSection -->
 
@@ -759,6 +768,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
 
@@ -783,6 +793,9 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const storage = firebase.storage();
 const functions = firebase.app().functions('southamerica-east1');
+const VAPID_KEY = "BHWbbpkwDj0cn9CAwawBRUOAUQcVZvUmq_r8EbpRjGE-f5NskWD1raeGC3D-fE3-_OGrfd2pr6ntbrOiOd_rb2o";
+let messaging = null;
+try { messaging = firebase.messaging(); } catch(e){ console.warn('Messaging indisponível:', e); }
 
 // ── Auth state (sessão local, verificação via Firestore) ──
 let currentUser = null;
@@ -1048,7 +1061,8 @@ function openModal(id){
     : `<div class="price-big price-consult"><small>Item profissional</small>Sob consulta</div>`;
   const actionBtn = pi.has
     ? `<button class="add-cart" onclick="addToCart('${p.id}')">Adicionar ao carrinho</button>`
-    : `<button class="add-cart consult" onclick="consultWhatsApp('${p.id}')">Consultar via WhatsApp</button>`;
+    : `<button class="add-cart consult" onclick="consultWhatsApp('${p.id}')">Consultar via WhatsApp</button>
+       <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="avisarQuandoDisponivel('${p.id}')">🔔 Avise-me quando chegar</button>`;
   document.getElementById('modalInfo').innerHTML = `
     <div class="cat">${getCategoriasProduto(p).join(', ')}</div>
     <h2>${p.nome}</h2>
@@ -1543,7 +1557,11 @@ function handleUserBtn(){
     const upgradeBtnHtml = showUpgradeBtn
       ? `<button onclick="closeAccountMenuAndOpenUpgrade(this)" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;color:var(--bronze-dark);border-bottom:1px solid var(--taupe-line);">⭐ Virar cabeleireiro(a)/distribuidor(a)</button>`
       : '';
-    menu.innerHTML = statusBlock + upgradeBtnHtml + `
+    const notifAtivas = customerProfile && customerProfile.pushToken;
+    const notifBtnHtml = notifAtivas
+      ? `<div style="padding:10px 16px;font-size:12px;color:#1a8a3e;border-bottom:1px solid var(--taupe-line);">🔔 Notificações ativadas</div>`
+      : `<button onclick="ativarNotificacoes();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;border-bottom:1px solid var(--taupe-line);">🔔 Ativar notificações</button>`;
+    menu.innerHTML = statusBlock + upgradeBtnHtml + notifBtnHtml + `
       <button onclick="openMyOrders();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;border-bottom:1px solid var(--taupe-line);">📦 Meus pedidos</button>
       <button onclick="doLogout();this.closest('div').remove();" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;background:none;font-size:13px;cursor:pointer;color:#8a2e2e;">Sair</button>`;
     document.body.appendChild(menu);
@@ -1901,6 +1919,50 @@ function closeSuccessModal(){
   document.getElementById('successOverlay').classList.remove('open');
 }
 
+async function ativarNotificacoes(){
+  if(!currentUser){ showAuthModal(()=>ativarNotificacoes()); return; }
+  if(!messaging){ alert('Seu navegador não suporta notificações push.'); return; }
+  if(!('Notification' in window)){ alert('Seu navegador não suporta notificações push.'); return; }
+  try {
+    const permission = await Notification.requestPermission();
+    if(permission !== 'granted'){
+      alert('Notificações não autorizadas. Você pode ativar depois nas configurações do navegador/celular.');
+      return false;
+    }
+    const token = await messaging.getToken({ vapidKey: VAPID_KEY });
+    if(token){
+      await db.collection('ar_clientes').doc(currentUser.uid).update({ pushToken: token });
+      customerProfile = Object.assign({}, customerProfile, { pushToken: token });
+      showToast('Notificações ativadas! 🔔');
+      return true;
+    }
+    return false;
+  } catch(err){
+    console.error(err);
+    alert('Não foi possível ativar notificações agora. Tente novamente mais tarde.');
+    return false;
+  }
+}
+
+async function avisarQuandoDisponivel(produtoId){
+  if(!currentUser){ showAuthModal(()=>avisarQuandoDisponivel(produtoId)); return; }
+  if(!customerProfile || !customerProfile.pushToken){
+    const ok = confirm('Pra te avisar quando chegar, primeiro precisamos ativar as notificações no seu navegador. Ativar agora?');
+    if(!ok) return;
+    const ativou = await ativarNotificacoes();
+    if(!ativou) return;
+  }
+  try {
+    await db.collection('ar_produtos').doc(produtoId).update({
+      notificarQuandoDisponivel: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+    });
+    showToast('Combinado! Vamos te avisar assim que chegar. 🔔');
+  } catch(err){
+    console.error(err);
+    alert('Não foi possível registrar seu interesse agora.');
+  }
+}
+
 async function pagarComMercadoPago(){
   if(!lastOrderId){ alert('Pedido não encontrado.'); return; }
   const btn = document.getElementById('btnPagarMP');
@@ -2226,6 +2288,33 @@ function refreshPendingBadge(){
   const badge = document.getElementById('pendingCountBadge');
   if(!badge) return;
   badge.textContent = adminCadastros.length ? ` (${adminCadastros.length})` : '';
+}
+
+async function enviarPromocao(){
+  const titulo = document.getElementById('notifTitulo').value.trim();
+  const mensagem = document.getElementById('notifMensagem').value.trim();
+  const adminKey = document.getElementById('notifChave').value;
+  const statusEl = document.getElementById('notifStatus');
+  if(!titulo || !mensagem){
+    statusEl.innerHTML = '<div class="status-msg err">Preencha título e mensagem.</div>';
+    return;
+  }
+  if(!adminKey){
+    statusEl.innerHTML = '<div class="status-msg err">Digite a senha de notificações.</div>';
+    return;
+  }
+  statusEl.innerHTML = '<div class="status-msg">Enviando…</div>';
+  try {
+    const enviar = functions.httpsCallable('enviarNotificacaoPromocao');
+    const result = await enviar({ titulo, mensagem, adminKey });
+    const n = (result.data && result.data.enviados) || 0;
+    statusEl.innerHTML = `<div class="status-msg ok">Notificação enviada para ${n} cliente(s).</div>`;
+    document.getElementById('notifTitulo').value = '';
+    document.getElementById('notifMensagem').value = '';
+  } catch(err){
+    console.error(err);
+    statusEl.innerHTML = `<div class="status-msg err">Erro: ${err.message}</div>`;
+  }
 }
 
 let _clienteSearchResults = [];
