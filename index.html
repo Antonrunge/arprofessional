@@ -2106,12 +2106,20 @@ function renderMyOrders(orders){
     const mini = (o.itens||[]).slice(0,2).map(i=>`${i.qty}x ${i.nome}`).join(', ')
       + ((o.itens||[]).length>2 ? ` +${o.itens.length-2}` : '');
     const jaPago = o.statusPagamento === 'pago';
+    const pagamentoLabel = {
+      pago: '💚 Pago',
+      aguardando: '⏳ Pagamento pendente',
+      recusado: '❌ Pagamento recusado',
+      cancelado: '⚪ Pagamento cancelado',
+      estornado: '↩️ Estornado',
+    }[o.statusPagamento] || null;
     const btnPagar = jaPago ? '' : `<button class="btn-pdf" style="background:#009ee3;color:#fff;" onclick="lastOrderId='${o.id}';pagarComMercadoPago();">💳 Pagar</button>`;
     return `<div class="order-card">
       <div class="order-card-head">
         <span class="oid">#${ordNum}</span>
         <span class="badge badge-${status}">${status}</span>
       </div>
+      ${pagamentoLabel ? `<div style="font-size:11px;color:#8a8074;margin-top:2px;">${pagamentoLabel}</div>` : ''}
       <div class="odate">${data}</div>
       <div class="order-items-mini">${mini}</div>
       <div class="order-card-foot">
@@ -2477,15 +2485,24 @@ function renderAdminOrders(){
     return;
   }
   const statusColors = {pendente:'#e8a000',processando:'#2a72c3',enviado:'#1a8a3e',entregue:'#555',cancelado:'#8a2e2e'};
+  const pagamentoLabel = {
+    pago: '💚 Pago',
+    aguardando: '⏳ Aguardando pagamento',
+    recusado: '❌ Pagamento recusado',
+    cancelado: '⚪ Pagamento cancelado',
+    estornado: '↩️ Estornado',
+  };
   wrap.innerHTML = adminOrders.map((o,i)=>{
     const ordNum = o.id.substring(0,8).toUpperCase();
     const data = o.criadoEm ? new Date(o.criadoEm.seconds*1000).toLocaleDateString('pt-BR') : '—';
     const status = o.status||'pendente';
     const cor = statusColors[status]||'#555';
+    const pgLabel = pagamentoLabel[o.statusPagamento] || null;
     return `<div class="admin-list-item" style="flex-wrap:wrap;align-items:center;gap:8px;">
       <div class="meta" style="flex:1;min-width:180px;">
         <div class="n">#${ordNum} — ${o.clienteNome||'—'}</div>
         <div class="c">${data} · ${formatBRL(o.total)} · ${(o.itens||[]).length} item(s)</div>
+        ${pgLabel ? `<div class="c" style="margin-top:2px;">${pgLabel}</div>` : ''}
       </div>
       <span style="background:${cor};color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">${status.toUpperCase()}</span>
       <div class="acts" style="display:flex;gap:6px;flex-wrap:wrap;">
