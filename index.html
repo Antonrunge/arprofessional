@@ -1929,7 +1929,11 @@ async function ativarNotificacoes(){
       alert('Notificações não autorizadas. Você pode ativar depois nas configurações do navegador/celular.');
       return false;
     }
-    const token = await messaging.getToken({ vapidKey: VAPID_KEY });
+    // O Firebase por padrão procura um arquivo chamado "firebase-messaging-sw.js",
+    // mas aqui o service worker já registrado se chama "service-worker.js" —
+    // por isso precisamos apontar explicitamente pra ele.
+    const swReg = await navigator.serviceWorker.ready;
+    const token = await messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: swReg });
     if(token){
       await db.collection('ar_clientes').doc(currentUser.uid).update({ pushToken: token });
       customerProfile = Object.assign({}, customerProfile, { pushToken: token });
@@ -1938,8 +1942,8 @@ async function ativarNotificacoes(){
     }
     return false;
   } catch(err){
-    console.error(err);
-    alert('Não foi possível ativar notificações agora. Tente novamente mais tarde.');
+    console.error('Erro ao ativar notificações:', err);
+    alert('Não foi possível ativar notificações agora (' + (err.code || err.message || 'erro desconhecido') + '). Tente novamente mais tarde.');
     return false;
   }
 }
