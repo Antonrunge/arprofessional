@@ -2470,28 +2470,53 @@ function renderAdminCadastros(){
   }).join('');
 }
 
-function approveCadastro(uid, idx){
+let _adminActionKey = null;
+async function getAdminActionKey(forcarNovaPergunta){
+  if(_adminActionKey && !forcarNovaPergunta) return _adminActionKey;
+  const key = prompt('Digite a senha de ações administrativas (mesma usada para notificações):');
+  if(!key) return null;
+  _adminActionKey = key;
+  return key;
+}
+async function chamarAlterarNivel(uid, updates){
+  const adminKey = await getAdminActionKey();
+  if(!adminKey) return { ok:false, cancelado:true };
+  try {
+    const fn = functions.httpsCallable('alterarNivelCliente');
+    await fn({ uid, updates, adminKey });
+    return { ok:true };
+  } catch(err){
+    if(err.code === 'permission-denied' || (err.message||'').includes('inválida')){
+      _adminActionKey = null; // senha errada, limpa pra perguntar de novo na próxima
+    }
+    return { ok:false, error: err.message };
+  }
+}
+
+async function approveCadastro(uid, idx){
   const c = adminCadastros[idx];
   const alvo = c.origem==='upgrade' ? c.upgradeSolicitado : c.tipoConta;
   const updates = { nivelAprovado: alvo, statusAprovacao: 'aprovado' };
   if(c.origem==='upgrade'){ updates.upgradeStatus = 'aprovado'; }
-  db.collection('ar_clientes').doc(uid).update(updates).then(()=>{
-    showStatus('Cadastro aprovado: agora vê preço de ' + alvo + '.', 'ok');
-    adminCadastros.splice(idx,1);
-    renderAdminCadastros();
-    refreshPendingBadge();
-  }).catch(err=>showStatus('Erro: '+err.message,'err'));
+  const result = await chamarAlterarNivel(uid, updates);
+  if(result.cancelado) return;
+  if(!result.ok){ showStatus('Erro: '+result.error, 'err'); return; }
+  showStatus('Cadastro aprovado: agora vê preço de ' + alvo + '.', 'ok');
+  adminCadastros.splice(idx,1);
+  renderAdminCadastros();
+  refreshPendingBadge();
 }
 
-function rejectCadastro(uid, idx){
+async function rejectCadastro(uid, idx){
   const c = adminCadastros[idx];
   const updates = c.origem==='upgrade' ? {upgradeStatus:'recusado'} : {statusAprovacao:'recusado'};
-  db.collection('ar_clientes').doc(uid).update(updates).then(()=>{
-    showStatus('Solicitação recusada.', 'ok');
-    adminCadastros.splice(idx,1);
-    renderAdminCadastros();
-    refreshPendingBadge();
-  }).catch(err=>showStatus('Erro: '+err.message,'err'));
+  const result = await chamarAlterarNivel(uid, updates);
+  if(result.cancelado) return;
+  if(!result.ok){ showStatus('Erro: '+result.error, 'err'); return; }
+  showStatus('Solicitação recusada.', 'ok');
+  adminCadastros.splice(idx,1);
+  renderAdminCadastros();
+  refreshPendingBadge();
 }
 
 function refreshPendingBadge(){
@@ -2825,19 +2850,20 @@ async function loadClienteStats(uid, idx){
   }
 }
 
-function setClienteNivel(uid, idx){
+async function setClienteNivel(uid, idx){
   const sel = document.getElementById('nivelSelect_'+idx);
   const novoNivel = sel.value;
-  db.collection('ar_clientes').doc(uid).update({
+  const result = await chamarAlterarNivel(uid, {
     nivelAprovado: novoNivel,
     statusAprovacao: 'aprovado',
     upgradeStatus: null,
     upgradeSolicitado: null
-  }).then(()=>{
-    showStatus('Qualificação atualizada para ' + novoNivel + '.', 'ok');
-    if(_clienteSearchResults[idx]) _clienteSearchResults[idx].nivelAprovado = novoNivel;
-    renderClienteSearchResults();
-  }).catch(err=>showStatus('Erro: '+err.message,'err'));
+  });
+  if(result.cancelado) return;
+  if(!result.ok){ showStatus('Erro: '+result.error, 'err'); return; }
+  showStatus('Qualificação atualizada para ' + novoNivel + '.', 'ok');
+  if(_clienteSearchResults[idx]) _clienteSearchResults[idx].nivelAprovado = novoNivel;
+  renderClienteSearchResults();
 }
 
 function loadAdminOrders(){
