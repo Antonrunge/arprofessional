@@ -2,6 +2,7 @@
   "name": "A R Professional — Catálogo",
   "short_name": "A R Professional",
   "description": "Catálogo digital A R Professional — produtos, kits e pedido direto via WhatsApp.",
+  "gcm_sender_id": "103953800507",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
