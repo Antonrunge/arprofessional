@@ -2184,7 +2184,7 @@ async function openCurso(cursoId){
   `;
 }
 
-function openAula(cursoId, aulaId){
+async function openAula(cursoId, aulaId){
   const aulas = academiaAulasCache[cursoId] || [];
   const aula = aulas.find(a=>a.id===aulaId);
   if(!aula) return;
@@ -2200,14 +2200,34 @@ function openAula(cursoId, aulaId){
   document.getElementById('academiaAulaView').style.display = 'block';
   document.getElementById('btnVoltarCurso').onclick = ()=>openCurso(cursoId);
 
-  const embed = toYoutubeEmbed(aula.videoUrl || '');
   document.getElementById('academiaAulaContent').innerHTML = `
     <h2>${aula.titulo}</h2>
-    <div style="margin:14px 0;aspect-ratio:16/9;max-width:100%;">
-      <iframe src="${embed}" style="width:100%;height:100%;border:0;border-radius:8px;" allowfullscreen></iframe>
+    <div style="margin:14px 0;aspect-ratio:16/9;max-width:100%;" id="aulaPlayerWrap">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8a8074;">Carregando vídeo…</div>
     </div>
     <p style="color:#8a8074;">${aula.descricao||''}</p>
   `;
+
+  const playerWrap = document.getElementById('aulaPlayerWrap');
+
+  if(aula.videoPath){
+    // Vídeo protegido no Storage — pede uma URL temporária, só liberada pra quem está logado
+    try{
+      if(!currentUser){ playerWrap.innerHTML = `<div style="color:#8a8074;padding:20px;">Faça login pra assistir.</div>`; return; }
+      const obterUrl = functions.httpsCallable('obterUrlAula');
+      const res = await obterUrl({ aulaId: aula.id, uid: currentUser.uid });
+      playerWrap.innerHTML = `<video src="${res.data.url}" style="width:100%;height:100%;border-radius:8px;background:#000;" controls controlsList="nodownload" playsinline></video>`;
+    } catch(err){
+      console.error(err);
+      playerWrap.innerHTML = `<div style="color:#c0392b;padding:20px;">Não foi possível carregar o vídeo. ${err.message||'Tente novamente.'}</div>`;
+    }
+  } else if(aula.videoUrl){
+    // Compatibilidade com aulas antigas hospedadas no YouTube
+    const embed = toYoutubeEmbed(aula.videoUrl);
+    playerWrap.innerHTML = `<iframe src="${embed}" style="width:100%;height:100%;border:0;border-radius:8px;" allowfullscreen></iframe>`;
+  } else {
+    playerWrap.innerHTML = `<div style="color:#8a8074;padding:20px;">Vídeo não disponível.</div>`;
+  }
 }
 
 
@@ -2730,8 +2750,16 @@ function openAulaForm(cursoId, aulaId){
         <div><label>Ordem</label><input id="f_aula_ordem" type="number" style="width:80px;" value="${a&&a.ordem!=null?a.ordem:''}"></div>
       </div>
       <div class="form-row">
-        <div style="flex:1;"><label>Link do YouTube (pode ser não listado)</label><input id="f_aula_video" value="${a?a.videoUrl||'':''}"></div>
+        <div style="flex:1;"><label>Link do YouTube (opcional — só se não for enviar vídeo protegido abaixo)</label><input id="f_aula_video" value="${a?a.videoUrl||'':''}"></div>
         <div><label>Duração (ex: 12 min)</label><input id="f_aula_duracao" style="width:110px;" value="${a?a.duracao||'':''}"></div>
+      </div>
+      <div class="form-row full">
+        <div style="width:100%;">
+          <label>Vídeo protegido (Storage — só quem está logado no app consegue assistir)</label>
+          <input type="hidden" id="f_aula_videopath" value="${a?a.videoPath||'':''}">
+          <input type="file" id="f_aula_videoupload" accept="video/*" onchange="uploadAulaVideo(this)">
+          <div id="f_aula_videopath_status" style="font-size:12px;color:#8a8074;margin-top:4px;">${a&&a.videoPath?'Vídeo já enviado: '+a.videoPath.split('_').slice(1).join('_'):''}</div>
+        </div>
       </div>
       <div class="form-row full"><div><label>Descrição</label><input id="f_aula_desc" style="width:100%;" value="${a?a.descricao||'':''}"></div></div>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;">
@@ -2745,11 +2773,28 @@ function openAulaForm(cursoId, aulaId){
   `;
 }
 
+function uploadAulaVideo(input){
+  const file = input.files[0];
+  if(!file) return;
+  const status = document.getElementById('f_aula_videopath_status');
+  const path = `ar_academia_videos/${Date.now()}_${file.name}`;
+  const ref = storage.ref(path);
+  status.textContent = 'Enviando vídeo... isso pode demorar um pouco dependendo do tamanho.';
+  ref.put(file).then(()=>{
+    document.getElementById('f_aula_videopath').value = path;
+    status.textContent = 'Vídeo enviado: ' + file.name;
+  }).catch(err=>{
+    console.error(err);
+    status.textContent = 'Falha no upload. Confira a configuração do Storage.';
+  });
+}
+
 async function saveAula(cursoId, aulaId){
   const data = {
     cursoId,
     titulo: document.getElementById('f_aula_titulo').value.trim(),
     videoUrl: document.getElementById('f_aula_video').value.trim(),
+    videoPath: document.getElementById('f_aula_videopath').value.trim(),
     duracao: document.getElementById('f_aula_duracao').value.trim(),
     descricao: document.getElementById('f_aula_desc').value.trim(),
     gratuita: document.getElementById('f_aula_gratuita').checked,
