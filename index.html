@@ -2131,7 +2131,13 @@ function renderAcademiaHome(){
     if(!cursosPorCategoria[catId]) cursosPorCategoria[catId] = [];
     cursosPorCategoria[catId].push(c);
   });
-  const categoriasOrdenadas = academiaCategorias.length ? academiaCategorias : [{id:'sem-categoria', nome:'Cursos'}];
+  const categoriasOrdenadas = academiaCategorias.length ? academiaCategorias.slice() : [];
+  // Garante um grupo "Cursos" pra qualquer curso sem categoria definida,
+  // mesmo quando já existem outras categorias cadastradas — antes, esses
+  // cursos simplesmente somiam da lista.
+  if(cursosPorCategoria['sem-categoria'] && !categoriasOrdenadas.some(c=>c.id==='sem-categoria')){
+    categoriasOrdenadas.push({id:'sem-categoria', nome:'Cursos'});
+  }
   wrap.innerHTML = categoriasOrdenadas.filter(cat=>cursosPorCategoria[cat.id]).map(cat=>{
     const cursos = cursosPorCategoria[cat.id] || [];
     return `<div style="margin-bottom:36px;">
